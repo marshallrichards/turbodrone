@@ -1,0 +1,162 @@
+# ------------------------
+# Python
+# ------------------------
+
+# Byte‐compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Translations
+*.mo
+*.pot
+
+# Django (if ever)
+local_settings.py
+db.sqlite3
+
+# Flask
+instance/
+.webassets-cache
+
+# Sphinx docs
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv / poetry
+Pipfile.lock
+poetry.lock
+
+# PEP 582
+__pypackages__/
+
+# Virtual environments
+.env
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope
+.ropeproject
+
+# mkdocs
+/site
+
+# mypy
+.mypy_cache/
+
+# pytest
+.pytest_cache/
+
+# IDEs / editors
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# ------------------------
+# Node / Frontend (React/TS/Tailwind)
+# ------------------------
+
+# dependencies
+node_modules/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# lockfiles (if you prefer not to commit them)
+# Uncomment if you don't commit lockfiles
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# build outputs
+build/
+dist/
+.next/
+out/
+public/
+
+# caches
+.cache/
+.parcel-cache/
+
+# tailwind
+.tailwind-cache/
+
+# TypeScript
+*.tsbuildinfo
+
+# environment
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# framework-specific (if you ever add)
+.serverless/
+.vuepress/dist/
