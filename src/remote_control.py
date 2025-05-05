@@ -11,11 +11,11 @@ class DroneController:
         self.control_port = control_port
         self.sock         = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        # stick midpoints = 128
-        self.yaw      = 128
-        self.throttle = 128
-        self.pitch    = 128
-        self.roll     = 128
+        # stick midpoints = 128.0
+        self.yaw      = 128.0
+        self.throttle = 128.0
+        self.pitch    = 128.0
+        self.roll     = 128.0
 
         # one-shot flags
         self.takeoff     = False
@@ -24,55 +24,79 @@ class DroneController:
         self.headless    = False
         self.calibration = False
 
+        # misc
         self.speed   = 20    # matches 0x14 from dumps
         self.record  = 0     # bit 2 in byte 7
         self.rocker  = 0     # bit 3 in byte 7
 
         self.running = True
 
+        # how fast to move stick inputs (units/sec)
+        self.accel_rate = 100.0   # when you hold a key
+        self.decel_rate =  80.0   # when you release it
+
+    def update_axes(self, dt, throttle_dir, yaw_dir, pitch_dir, roll_dir):
+        """Apply acceleration or deceleration for each axis."""
+        center = 128.0
+        for attr, direction in (
+            ('throttle', throttle_dir),
+            ('yaw',      yaw_dir),
+            ('pitch',    pitch_dir),
+            ('roll',     roll_dir),
+        ):
+            cur = getattr(self, attr)
+            if direction > 0:
+                new = min(255.0, cur + self.accel_rate * dt)
+            elif direction < 0:
+                new = max(  0.0, cur - self.accel_rate * dt)
+            else:
+                # return to center
+                if cur > center:
+                    new = max(center, cur - self.decel_rate * dt)
+                elif cur < center:
+                    new = min(center, cur + self.decel_rate * dt)
+                else:
+                    new = cur
+            setattr(self, attr, new)
+
     def build_packet_hy(self):
         pkt = bytearray(20)
-
-        # 0–1: header & speed
         pkt[0] = 0x66
         pkt[1] = self.speed & 0xFF
 
-        # 2–3: yaw (horiz) / throttle (vert)
-        pkt[2] = self.yaw      & 0xFF
-        pkt[3] = self.throttle & 0xFF
+        # Cast floats back to ints
+        pkt[2] = int(self.yaw)      & 0xFF
+        pkt[3] = int(self.throttle) & 0xFF
+        pkt[4] = int(self.pitch)    & 0xFF
+        pkt[5] = int(self.roll)     & 0xFF
 
-        # 4–5: pitch / roll
-        pkt[4] = self.pitch & 0xFF
-        pkt[5] = self.roll  & 0xFF
-
-        # 6: takeoff / land / stop / calibration
-        flags6 = 0
-        flags6 |= 0x01 if self.takeoff     else 0
-        flags6 |= 0x02 if self.land        else 0
-        flags6 |= 0x04 if self.stop        else 0
-        flags6 |= (self.calibration << 2)   # 0x04 if calibration
+        # flags…
+        flags6 = (
+            (0x01 if self.takeoff     else 0) |
+            (0x02 if self.land        else 0) |
+            (0x04 if self.stop        else 0) |
+            ((self.calibration << 2))
+        )
         pkt[6] = flags6
 
-        # 7: headless + alive + record + rocker
-        flags7 = 0
-        flags7 |= 0x01 if self.headless else 0
-        flags7 |= 0x02                 # ALWAYS the "alive" bit
-        flags7 |= (self.record << 2)
-        flags7 |= (self.rocker << 3)
+        flags7 = (
+            (0x01 if self.headless else 0) |
+            0x02 |                # alive bit
+            (self.record << 2) |
+            (self.rocker << 3)
+        )
         pkt[7] = flags7
 
-        # 8–17 = 0
+        # bytes 8–17 = 0
 
-        # 18 = XOR of bytes 2–17
+        # checksum over bytes 2–17
         chk = 0
         for i in range(2, 18):
             chk ^= pkt[i]
         pkt[18] = chk & 0xFF
-
-        # 19 = footer
         pkt[19] = 0x99
 
-        # clear one-shot flags
+        # clear one-shots
         self.takeoff = self.land = self.stop = False
 
         return pkt
@@ -88,57 +112,92 @@ class DroneController:
 
 
 def ui_loop(stdscr, controller):
-    # configure curses
     curses.curs_set(0)
     stdscr.nodelay(True)
     stdscr.keypad(True)
-
     help_msg = "W/S=throttle  A/D=yaw  Arrows=pitch/roll  T=takeoff  L=land  Q=quit"
 
+    # direction states and last-press timestamps
+    throttle_dir = yaw_dir = pitch_dir = roll_dir = 0
+    throttle_ts = yaw_ts = pitch_ts = roll_ts = 0.0
+    PRESS_THRESHOLD = 0.2  # threshold for key being held
+
+    prev_time = time.time()
+
     while controller.running:
+        now = time.time()
+        dt  = now - prev_time
+        prev_time = now
+
         c = stdscr.getch()
         if c in (ord('q'), ord('Q')):
             controller.stop_loop()
             break
+
         elif c in (ord('t'), ord('T')):
             controller.takeoff = True
         elif c in (ord('l'), ord('L')):
-            controller.stop = True
-        # throttle: W / S
+            controller.land = True
+
+        # throttle
         elif c in (ord('w'), ord('W')):
-            controller.throttle = min(255, controller.throttle + 5)
+            throttle_dir = +1; throttle_ts = now
         elif c in (ord('s'), ord('S')):
-            controller.throttle = max(0,   controller.throttle - 5)
-        # yaw: A / D
+            throttle_dir = -1; throttle_ts = now
+
+        # yaw
         elif c in (ord('a'), ord('A')):
-            controller.yaw = max(0,   controller.yaw - 5)
+            yaw_dir = -1; yaw_ts = now
         elif c in (ord('d'), ord('D')):
-            controller.yaw = min(255, controller.yaw + 5)
-        # pitch: Up / Down arrows
+            yaw_dir = +1; yaw_ts = now
+
+        # pitch
         elif c == curses.KEY_UP:
-            controller.pitch = min(255, controller.pitch + 5)
+            pitch_dir = +1; pitch_ts = now
         elif c == curses.KEY_DOWN:
-            controller.pitch = max(0,   controller.pitch - 5)
-        # roll: Left / Right arrows
+            pitch_dir = -1; pitch_ts = now
+
+        # roll
         elif c == curses.KEY_LEFT:
-            controller.roll = max(0,   controller.roll - 5)
+            roll_dir = -1; roll_ts = now
         elif c == curses.KEY_RIGHT:
-            controller.roll = min(255, controller.roll + 5)
+            roll_dir = +1; roll_ts = now
+
+        # decide if each axis is "still held"
+        active_throttle = throttle_dir if (now - throttle_ts) < PRESS_THRESHOLD else 0
+        active_yaw      = yaw_dir      if (now - yaw_ts)      < PRESS_THRESHOLD else 0
+        active_pitch    = pitch_dir    if (now - pitch_ts)    < PRESS_THRESHOLD else 0
+        active_roll     = roll_dir     if (now - roll_ts)     < PRESS_THRESHOLD else 0
+
+        # apply acceleration / deceleration
+        controller.update_axes(
+            dt,
+            active_throttle,
+            active_yaw,
+            active_pitch,
+            active_roll
+        )
 
         # redraw
         stdscr.clear()
-        stdscr.addstr(0, 0, f"Throttle: {controller.throttle:3d}    Yaw:   {controller.yaw:3d}")
-        stdscr.addstr(1, 0, f" Pitch:   {controller.pitch:3d}    Roll:  {controller.roll:3d}")
+        stdscr.addstr(0, 0,
+            f"Throttle: {int(controller.throttle):3d}    "
+            f"Yaw:      {int(controller.yaw):3d}")
+        stdscr.addstr(1, 0,
+            f" Pitch:   {int(controller.pitch):3d}    "
+            f"Roll:     {int(controller.roll):3d}")
         stdscr.addstr(3, 0, help_msg)
         stdscr.refresh()
+
+        # small sleep to cap UI frame-rate
         time.sleep(0.02)
 
 
 def main():
     parser = argparse.ArgumentParser(description="FH‐drone teleop interface")
     parser.add_argument("--drone-ip",    required=True, help="Drone UDP IP address")
-    parser.add_argument("--control-port", type=int, default=8080,    help="Drone control port")
-    parser.add_argument("--rate",         type=float, default=20.0,   help="Control packets per second")
+    parser.add_argument("--control-port", type=int, default=8080, help="Drone control port")
+    parser.add_argument("--rate",         type=float, default=20.0, help="Control packets per second")
     args = parser.parse_args()
 
     controller = DroneController(args.drone_ip, args.control_port)
