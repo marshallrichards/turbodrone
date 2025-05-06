@@ -1,6 +1,7 @@
 # Turbodrone
 API and additional capabilities for controlling the Hiturbo S20 camera drone from a computer instead of the closed-source mobile app.
 
+![S20 Drone Short Clip](docs/images/s20-drone-short-clip-small.gif)
 
 ## Introduction
 Nowadays, there are incredibly cheap "toy" drones available on amazon that are basically paired-down clones of the early DJI mavic. $45 to have a 1080p camera, tiny downard-facing optical flow sensor, and really tuned flight out-of-the-box. The only problem is they have custom firmware on them and come with bad physical controllers and are locked to being controlled by a custom mobile app. I thought it would be cool to free one of these from its "jail" and write an API around it by reverse-engineering how the mobile app video feed and controls protocols work and add some additional capabilities.
