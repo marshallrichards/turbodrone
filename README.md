@@ -38,7 +38,12 @@ python receive_video.py
 
 ## Status
 Currently only video feed is working. 
-TODO: controls
+TODO: controls in progress.
+
+
+## Development
+To follow along with development, download the Hiturbo APK from a mirror site and decompile to java files with jadx.
+From there, explore the java files like `HyControlConsumer.java` to understand the protocols used.
 
 
 
