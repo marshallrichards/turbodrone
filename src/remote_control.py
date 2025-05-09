@@ -195,7 +195,7 @@ def ui_loop(stdscr, controller):
 
 def main():
     parser = argparse.ArgumentParser(description="FH‐drone teleop interface")
-    parser.add_argument("--drone-ip",    required=True, help="Drone UDP IP address")
+    parser.add_argument("--drone-ip",    type=str, default="172.16.10.1", help="Drone UDP IP address")
     parser.add_argument("--control-port", type=int, default=8080, help="Drone control port")
     parser.add_argument("--rate",         type=float, default=20.0, help="Control packets per second")
     args = parser.parse_args()
