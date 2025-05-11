@@ -70,26 +70,27 @@ class DroneController:
         pkt[4] = int(self.pitch)    & 0xFF
         pkt[5] = int(self.roll)     & 0xFF
 
-        # flags…
-        flags6 = (
-            (0x01 if self.takeoff     else 0) |
-            (0x02 if self.land        else 0) |
-            (0x04 if self.stop        else 0) |
-            ((self.calibration << 2))
-        )
-        pkt[6] = flags6
+        # Byte 6 should be 0x00
+        pkt[6] = 0x00
+        
+        # Handle one-shot flags
+        if self.takeoff:
+            pkt[6] |= 0x01
+        if self.land:
+            pkt[6] |= 0x02
+        if self.stop:
+            pkt[6] |= 0x04
 
-        flags7 = (
-            (0x01 if self.headless else 0) |
-            0x02 |                # alive bit
-            (self.record << 2) |
-            (self.rocker << 3)
-        )
-        pkt[7] = flags7
+        # Byte 7 should be 0x0a
+        pkt[7] = 0x0a  # Base value is 0x0a
+        
+        # record flag 
+        if self.record:
+            pkt[7] |= (self.record << 2)
 
-        # bytes 8–17 = 0
+        # bytes 8-17 = 0 (zero-filled)
 
-        # checksum over bytes 2–17
+        # checksum over bytes 2-17
         chk = 0
         for i in range(2, 18):
             chk ^= pkt[i]
@@ -102,13 +103,48 @@ class DroneController:
         return pkt
 
     def send_loop(self, interval=0.05):
+        # debug flag
+        self.debug_packets = False
+        packet_counter = 0
+        
         while self.running:
             buf = self.build_packet_hy()
             self.sock.sendto(buf, (self.drone_ip, self.control_port))
+            
+            # Log packet details if debug is enabled
+            if self.debug_packets:
+                packet_counter += 1
+                
+                # Print full packet hex dump
+                hex_dump = ' '.join(f'{b:02x}' for b in buf)
+                print(f"Packet #{packet_counter}: {hex_dump}")
+                
+                # Print decoded controls
+                print(f"  Controls: Y:{buf[2]} T:{buf[3]} P:{buf[4]} R:{buf[5]}")
+                
+                # Print flags
+                flags6 = buf[6]
+                flags7 = buf[7]
+                flags_desc = []
+                if flags6 & 0x01: flags_desc.append("TAKEOFF")
+                if flags6 & 0x02: flags_desc.append("LAND")
+                if flags6 & 0x04: flags_desc.append("STOP")
+                if flags7 & 0x01: flags_desc.append("HEADLESS")
+                if flags7 & 0x04: flags_desc.append("RECORD")
+                
+                print(f"  Flags: {flags_desc}")
+                print(f"  Checksum: 0x{buf[18]:02x}")
+                print()
+                
             time.sleep(interval)
 
     def stop_loop(self):
         self.running = False
+
+    def toggle_debug(self):
+        """Toggle debug packet logging"""
+        self.debug_packets = not self.debug_packets
+        return self.debug_packets
 
 
 def ui_loop(stdscr, controller):
@@ -116,6 +152,7 @@ def ui_loop(stdscr, controller):
     stdscr.nodelay(True)
     stdscr.keypad(True)
     help_msg = "W/S=throttle  A/D=yaw  Arrows=pitch/roll  T=takeoff  L=land  Q=quit"
+    help_msg2 = "R=record  F=debug packets"
 
     # direction states and last-press timestamps
     throttle_dir = yaw_dir = pitch_dir = roll_dir = 0
@@ -123,6 +160,7 @@ def ui_loop(stdscr, controller):
     PRESS_THRESHOLD = 0.2  # threshold for key being held
 
     prev_time = time.time()
+    debug_enabled = False
 
     while controller.running:
         now = time.time()
@@ -138,6 +176,10 @@ def ui_loop(stdscr, controller):
             controller.takeoff = True
         elif c in (ord('l'), ord('L')):
             controller.land = True
+        elif c in (ord('r'), ord('R')):
+            controller.record = 1 if controller.record == 0 else 0
+        elif c in (ord('f'), ord('F')):
+            debug_enabled = controller.toggle_debug()
 
         # throttle
         elif c in (ord('w'), ord('W')):
@@ -178,7 +220,7 @@ def ui_loop(stdscr, controller):
             active_roll
         )
 
-        # redraw
+        # Update the UI
         stdscr.clear()
         stdscr.addstr(0, 0,
             f"Throttle: {int(controller.throttle):3d}    "
@@ -186,7 +228,16 @@ def ui_loop(stdscr, controller):
         stdscr.addstr(1, 0,
             f" Pitch:   {int(controller.pitch):3d}    "
             f"Roll:     {int(controller.roll):3d}")
-        stdscr.addstr(3, 0, help_msg)
+            
+        # Add status flags to UI
+        status_flags = []
+        if controller.record: status_flags.append("RECORD")
+        if debug_enabled: status_flags.append("DEBUG")
+        status_str = " | ".join(status_flags) if status_flags else "Normal mode"
+        stdscr.addstr(2, 0, f"Status: {status_str}")
+            
+        stdscr.addstr(4, 0, help_msg)
+        stdscr.addstr(5, 0, help_msg2)
         stdscr.refresh()
 
         # small sleep to cap UI frame-rate
