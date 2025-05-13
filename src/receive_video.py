@@ -32,7 +32,8 @@ SYNC_BYTES      = b"\x40\x40"
 # • SID bits 0-3 … slice number inside that frame   (1,2,3…)
 #   SID bit  4   … LAST-SLICE flag (1 == this is the final fragment)
 #   SID bits 5-7 … always 0
-# • bytes 6…     … payload  (usually starts with 0x78 0x??  → zlib header)
+# • bytes 6 & 7    … static header piece (usually starts with 0x78 0x05 )
+# • bytes 8+      … payload
 # --------------------------------------------------------------------------- #
 HEADER_LEN = 8
 
@@ -123,19 +124,16 @@ class VideoReceiver(threading.Thread):
         # 1) stitch slices together in ascending order
         data = b"".join(fragments[i] for i in sorted(fragments))
 
-        # 2) skip decompression – just use raw data
-        decompressed = data
-
-        # 3) find the real JPEG in the bytes
-        start = decompressed.find(SOI_MARKER)
-        end   = decompressed.rfind(EOI_MARKER)
+        # 2) find the real JPEG in the bytes
+        start = data.find(SOI_MARKER)
+        end   = data.rfind(EOI_MARKER)
         if start < 0 or end < 0 or end <= start:
             print(f"[receiver] JPEG markers missing on frame {fid}")
             return
 
-        jpeg = decompressed[start : end + 2]
+        jpeg = data[start : end + 2]
 
-        # 4) dump & push
+        # 3) dump & push
         if self.dump_frames:
             ts = int(time.time() * 1000)
             with open(f"frame_{fid:02x}_{ts}.jpg", "wb") as f:

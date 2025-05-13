@@ -1,5 +1,5 @@
 # Turbodrone
-API and client for controlling some of the best-selling sub-$50 "toy" camera drones on Amazon from a computer instead of the closed-source mobile apps they come with.
+Reverse-engineered API and client for controlling some of the best-selling ~$50 "toy" drones on Amazon from a computer replacing the closed-source mobile apps they come with.
 
 ![S20 Drone Short Clip](docs/images/s20-drone-short-clip-small.gif)
 
@@ -9,7 +9,7 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
 ## Hardware
 * Camera Drone:
   * Hiturbo S20 foldable drone: https://www.amazon.com/dp/B0BBVZ849G 
-    * This is currently the only drone supported, but having decompiled the APKs of other best-selling camera drones on Amazon, a lot of them use the exact same libraries and protocols under-the-hood (if not the _exact_ same codebase: see [Loiley Drone](https://www.amazon.com/Altitude-Adjustment-Headless-Batteries-Beginner/dp/B0DWK65J3Y) and [its app](https://play.google.com/store/apps/details?id=com.vison.macrochip.loiley.fly&hl=en_US) for an example on how it shares the exact same `com.vision.macrochip.X` package naming scheme as the Hiturbo app).
+    * This is currently the only drone supported, but having decompiled the APKs of other best-selling camera drones on Amazon, a lot of them use the exact same libraries and protocols under-the-hood (if not the _exact_ same codebase: see [Loiley Drone](https://www.amazon.com/Altitude-Adjustment-Headless-Batteries-Beginner/dp/B0DWK65J3Y) and [its app](https://play.google.com/store/apps/details?id=com.vison.macrochip.loiley.fly&hl=en_US) for an example on how it shares the exact same `com.vision.macrochip.X` package as the Hiturbo app).
 * WiFi Dongle ([recommend ALFA Network AWUS036ACM](https://www.amazon.com/Network-AWUS036ACM-Long-Range-Wide-Coverage-High-Sensitivity/dp/B08BJS8FXD) or similar) 
   * drone broadcasts its own WiFi network so your computer will have to connect to it.
 
