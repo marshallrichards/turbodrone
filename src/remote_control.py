@@ -64,12 +64,13 @@ class DroneController:
         pkt[0] = 0x66
         pkt[1] = self.speed & 0xFF
 
-        # Cast floats back to ints
-        pkt[2] = int(self.yaw)      & 0xFF
-        pkt[3] = int(self.throttle) & 0xFF
-        pkt[4] = int(self.pitch)    & 0xFF
-        pkt[5] = int(self.roll)     & 0xFF
+        # Cast floats back to ints with CORRECTED ORDER
+        pkt[2] = int(self.roll)     & 0xFF
+        pkt[3] = int(self.pitch)    & 0xFF  
+        pkt[4] = int(self.throttle) & 0xFF
+        pkt[5] = int(self.yaw)      & 0xFF
 
+        # FIXED: flags in byte 6 and 7 were reversed compared to mobile app
         # Byte 6 should be 0x00
         pkt[6] = 0x00
         
@@ -84,7 +85,7 @@ class DroneController:
         # Byte 7 should be 0x0a
         pkt[7] = 0x0a  # Base value is 0x0a
         
-        # record flag 
+        # record flag
         if self.record:
             pkt[7] |= (self.record << 2)
 
@@ -120,7 +121,7 @@ class DroneController:
                 print(f"Packet #{packet_counter}: {hex_dump}")
                 
                 # Print decoded controls
-                print(f"  Controls: Y:{buf[2]} T:{buf[3]} P:{buf[4]} R:{buf[5]}")
+                print(f"  Controls: R:{buf[2]} P:{buf[3]} T:{buf[4]} Y:{buf[5]}")
                 
                 # Print flags
                 flags6 = buf[6]
