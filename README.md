@@ -7,9 +7,18 @@ Reverse-engineered API and client for controlling some of the best-selling ~$50 
 Nowadays, there are incredibly cheap "toy" drones available on Amazon that are basically paired-down clones of the early DJI mavic. Only ~$50 to have a 1080p camera for FPV and recording, tiny downard-facing optical flow sensor for position and altitude hold, and a well tuned flight profile out-of-the-box. The only problem with drones like this is that they run closed-source firmware and are locked to only being controlled by a custom mobile app. I thought it would be cool to free some of these drones from their "jail" and write an API and client for accessing the video feed and sending control commands down to the drone by reverse-engineering how the mobile apps work. That way you can turn a highly capable $50 "toy" drone into something that can be programmatically controlled and used for all sorts of applications and experiments.
 
 ## Hardware
-* Camera Drone:
-  * Hiturbo S20 foldable drone: https://www.amazon.com/dp/B0BBVZ849G 
-    * This is currently the only drone supported, but having decompiled the APKs of other best-selling camera drones on Amazon, a lot of them use the exact same libraries and protocols under-the-hood (if not the _exact_ same codebase: see [Loiley Drone](https://www.amazon.com/dp/B0D53Z84BW) and [its app](https://play.google.com/store/apps/details?id=com.vison.macrochip.loiley.fly&hl=en_US) for an example on how it shares the exact same `com.vision.macrochip.X` package as the Hiturbo app).
+* WiFi Camera Drone (ranked in order of recommendation):
+
+    | Brand      | Model Number    | Compatibility | Purchase Link                                                   |
+    |------------|-----------------|-----------|-----------------------------------------------------------------|
+    | Hiturbo    | S20             | Tested    | [Amazon](https://www.amazon.com/dp/B0BBVZ849G), [Alternate Amazon Listing](https://www.amazon.com/Beginners-Foldable-Quadcopter-Gestures-Batteries/dp/B0D8LK1KJ3)                  |
+    | Loiley     | S29             | Tested    | [Amazon](https://www.amazon.com/dp/B0D53Z84BW)                  |
+    | Velcase    | S101            | Suspected | [Amazon](https://www.amazon.com/Foldable-Beginners-Quadcopter-Carrying-Positioning/dp/B0CH341G5F/)  |
+
+  _Suspected means the APK for the drone appears to use the exact same packages and libraries as one of the tested drones._
+  
+  Also note that S20, S29, and S101 drones _appear_ to be from the same OEM ("Overflew" is usually written somewhere on the drone) and use the same underlying mobile app just re-badged/whitelabeled by different companies selling on Amazon so you may see that same model number sold by a different company and it _likely_ will still be compatible.
+
 * WiFi Dongle ([recommend ALFA Network AWUS036ACM](https://www.amazon.com/Network-AWUS036ACM-Long-Range-Wide-Coverage-High-Sensitivity/dp/B08BJS8FXD) or similar) 
   * drone broadcasts its own WiFi network so your computer will have to connect to it.
 
@@ -36,16 +45,24 @@ _If_ you are on Windows, you will need to manually install the `curses` library.
 pip install windows-curses
 ```
 
-Make sure WiFi Dongle is plugged in, drone is turned on, connect to the "Hiturbo-S20-XXXXXX" network, and then run the script
+Make sure WiFi Dongle is plugged in, drone is turned on, connect to the "BRAND-MODEL-XXXXXX" network before proceeding.
+
+To run the video viewer, run: 
 ```
 python receive_video.py
 ```
 
+To control the drone from the CLI client, run:
+```
+python remote_control.py
+```
+Make sure fly in a safe area. And note that the "Land" button _currently_ is more of a E-stop button that will stop the drone motors immediately.
 
 
 ## Status
-Currently only video feed is working. 
-TODO: controls are close to being done.
+Video feed: solid.
+
+Controls: initial version out now. 
 
 Also working on adding support for more drones from [Amazon's best-selling drone list](https://www.amazon.com/best-selling-drones/s?k=best+selling+drones).
 
@@ -53,7 +70,7 @@ Also working on adding support for more drones from [Amazon's best-selling drone
 ## Development
 To follow along with development, download the [Hiturbo APK](https://play.google.com/store/apps/details?id=com.vison.macrochip.hiturbo.fpv&hl=en_US) from a mirror site and decompile to java files with [jadx](https://github.com/skylot/jadx).
 From there, explore the java files like `HyControlConsumer.java` and `UDPHeartbeat.java` to understand the implemenetation of the protocols.
-Additionally, Wireshark is your friend for understanding the raw data packets being sent and received.
+Additionally, Wireshark is your friend for understanding the raw data packets being sent and received. Watch this [video](https://x.com/marshallrichrds/status/1923165437698670818) for an overview into the reverse engineering process used.
 
 
 
