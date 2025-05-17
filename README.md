@@ -9,15 +9,17 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
 ## Hardware
 * WiFi Camera Drone (ranked in order of recommendation):
 
-    | Brand      | Model Number    | Compatibility | Purchase Link                                                   |
-    |------------|-----------------|-----------|-----------------------------------------------------------------|
-    | Hiturbo    | S20             | Tested    | [Amazon](https://www.amazon.com/dp/B0BBVZ849G), [Alternate Amazon Listing](https://www.amazon.com/Beginners-Foldable-Quadcopter-Gestures-Batteries/dp/B0D8LK1KJ3)                  |
-    | Loiley     | S29             | Tested    | [Amazon](https://www.amazon.com/dp/B0D53Z84BW)                  |
-    | Velcase    | S101            | Suspected | [Amazon](https://www.amazon.com/Foldable-Beginners-Quadcopter-Carrying-Positioning/dp/B0CH341G5F/)  |
+    | Brand      | Model Number    | Compatibility | Purchase Link                                               | Notes |
+    |------------|-----------------|---------------|-------------------------------------------------------------|-------|
+    | Loiley     | S29             | Tested    | [Amazon](https://www.amazon.com/dp/B0D53Z84BW)                  | Best build quality, has servo for tilting camera(_not implemented in API yet_)|
+    | Hiturbo    | S20             | Tested    | [Amazon](https://www.amazon.com/dp/B0BBVZ849G), [Alternate Amazon Listing](https://www.amazon.com/Beginners-Foldable-Quadcopter-Gestures-Batteries/dp/B0D8LK1KJ3)                  | Original test platform, great build quality|
+    | Velcase    | S101            | TODO | [Amazon](https://www.amazon.com/Foldable-Beginners-Quadcopter-Carrying-Positioning/dp/B0CH341G5F/)  | lower quality build, smaller battery and props than S29 & S20|
 
   _Suspected means the APK for the drone appears to use the exact same packages and libraries as one of the tested drones._
+
+  _TODO means the APK operates with different byte packets and protocols and will have to be added as a new implementation in the API._
   
-  Also note that S20, S29, and S101 drones _appear_ to be from the same OEM ("Overflew" is usually written somewhere on the drone) and use the same underlying mobile app just re-badged/whitelabeled by different companies selling on Amazon so you may see that same model number sold by a different company and it _likely_ will still be compatible.
+  Also note that S20, S29 drones _appear_ to be from the same OEM ("Overflew" is usually written somewhere on the drone) and use the same underlying mobile app just re-badged/whitelabeled by different companies selling on Amazon so you may see that same model number sold by a different company and it _likely_ will still be compatible.
 
 * WiFi Dongle ([recommend ALFA Network AWUS036ACM](https://www.amazon.com/Network-AWUS036ACM-Long-Range-Wide-Coverage-High-Sensitivity/dp/B08BJS8FXD) or similar) 
   * drone broadcasts its own WiFi network so your computer will have to connect to it.
@@ -56,13 +58,13 @@ To control the drone from the CLI client, run:
 ```
 python remote_control.py
 ```
-Make sure fly in a safe area. And note that the "Land" button _currently_ is more of a E-stop button that will stop the drone motors immediately.
+Make sure to fly in a safe area, preferably outdoors with little wind. And note that the "Land" button _currently_ is more of a E-stop button that will stop the drone motors immediately.
 
 
 ## Status
 Video feed: solid.
 
-Controls: initial version out now. 
+Controls: initial version out now. A little bit rough, still working on smoothing out the accel and decel on keypresses. 
 
 Also working on adding support for more drones from [Amazon's best-selling drone list](https://www.amazon.com/best-selling-drones/s?k=best+selling+drones).
 
