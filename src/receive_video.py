@@ -9,6 +9,8 @@ from datetime import datetime
 
 import cv2
 import numpy as np
+from ultralytics import YOLO
+import math
 
 ###############################################################################
 # Constants
@@ -226,6 +228,22 @@ def display_frames(frame_q: queue.Queue):
     fps_timer = time.time()
     frame_count = 0
 
+    # Initialize YOLO model
+    model = YOLO("yolov8n.pt") # Make sure you have this model file or update the path
+
+    # COCO class names
+    classNames = ["person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat",
+                  "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
+                  "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+                  "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat",
+                  "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup",
+                  "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli",
+                  "carrot", "hot dog", "pizza", "donut", "cake", "chair", "sofa", "pottedplant", "bed",
+                  "diningtable", "toilet", "tvmonitor", "laptop", "mouse", "remote", "keyboard", "cell phone",
+                  "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
+                  "teddy bear", "hair drier", "toothbrush"
+                  ]
+
     while True:
         jpeg = None
         try:
@@ -244,6 +262,38 @@ def display_frames(frame_q: queue.Queue):
                 img, is_real = placeholder, False
             else:
                 print(f"[display] decoded frame {frame.shape}")
+                
+                # Perform object detection
+                results = model(frame, stream=True)
+                
+                # coordinates
+                for r in results:
+                    boxes = r.boxes
+                    for box in boxes:
+                        # bounding box
+                        x1, y1, x2, y2 = box.xyxy[0]
+                        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2) # convert to int values
+                        
+                        # put box in cam
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 255), 3)
+                        
+                        # confidence
+                        confidence = math.ceil((box.conf[0]*100))/100
+                        # print("Confidence --->",confidence)
+                        
+                        # class name
+                        cls = int(box.cls[0])
+                        # print("Class name -->", classNames[cls])
+                        
+                        # object details
+                        org = [x1, y1-10] # offset y to display text above the box
+                        font_obj = cv2.FONT_HERSHEY_SIMPLEX
+                        fontScale_obj = 0.5
+                        color_obj = (255, 0, 0)
+                        thickness_obj = 1
+                        
+                        cv2.putText(frame, f"{classNames[cls]}: {confidence:.2f}", org, font_obj, fontScale_obj, color_obj, thickness_obj)
+
                 img, is_real = frame, True
 
         cv2.imshow("Drone", img)
