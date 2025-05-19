@@ -160,3 +160,8 @@ public/
 # framework-specific (if you ever add)
 .serverless/
 .vuepress/dist/
+
+# ------------------------
+# Large model files
+# ------------------------
+checkpoints/depth_pro.pt

@@ -45,6 +45,13 @@
    cp path/to/checkpoint.pth depth-pro-env/lib/python3.9/site-packages/depth_pro/checkpoints/
    ```
 
+5. **Note on large model files**
+   ```bash
+   # Large model files like checkpoints/depth_pro.pt (1.8GB) are excluded from Git using .gitignore
+   # When setting up a new environment, download these files separately or use Git LFS
+   # See previous step for download instructions.
+   ```
+
 ### Running the System
 1. **Activate environment**
    ```bash
