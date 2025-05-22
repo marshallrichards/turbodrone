@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 import queue
 import time
+import sys
+import ctypes
 from views.base_video_view import BaseVideoView
 
 class OpenCVVideoView(BaseVideoView):
@@ -11,6 +13,19 @@ class OpenCVVideoView(BaseVideoView):
         super().__init__(frame_queue)
         self.window_name = window_name
         
+    # ------------------------------------------------------------------ #
+    # private helper – poke HighGUI so waitKey() returns immediately
+    # ------------------------------------------------------------------ #
+    def _wakeup_highgui(self):
+        if sys.platform.startswith("win"):
+            hwnd = ctypes.windll.user32.FindWindowW(None, self.window_name)
+            if hwnd:
+                ctypes.windll.user32.PostMessageW(hwnd, 0, 0, 0)
+        else:
+            # On X11 / Cocoa / Qt nothing special is needed – an extra waitKey
+            # call will do.
+            cv2.waitKey(1)
+
     def run(self):
         """Start the OpenCV display loop"""
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
@@ -68,8 +83,10 @@ class OpenCVVideoView(BaseVideoView):
                     now = time.time()
                     print(f"[display] ~{frame_count/(now-fps_timer):4.1f} fps")
                     fps_timer, frame_count = now, 0
-    
+        
+        cv2.destroyAllWindows()
+
     def stop(self):
         """Stop the display loop"""
         self.running = False
-        cv2.destroyAllWindows() 
+        self._wakeup_highgui()            # make waitKey return 

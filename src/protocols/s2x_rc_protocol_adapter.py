@@ -1,7 +1,7 @@
 from protocols.base_protocol_adapter import BaseProtocolAdapter
 import socket
 
-class S2xProtocolAdapter(BaseProtocolAdapter):
+class S2xRCProtocolAdapter(BaseProtocolAdapter):
     """Protocol adapter for S2x drones (S20, S29)"""
     
     def __init__(self, drone_ip, control_port=8080):

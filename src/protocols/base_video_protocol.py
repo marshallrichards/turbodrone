@@ -39,6 +39,7 @@ class BaseVideoProtocolAdapter(ABC):
             return
             
         self.running = True
+        self._stop_evt = threading.Event()
         self.keepalive_thread = threading.Thread(
             target=self._keepalive_loop,
             args=(interval,),
@@ -48,27 +49,14 @@ class BaseVideoProtocolAdapter(ABC):
     
     def stop_keepalive(self):
         """Stop the keepalive thread"""
-        # Set flag to stop the thread
-        self.running = False
-        
+        if hasattr(self, "_stop_evt"):
+            self._stop_evt.set()        # wake the waiter
         if self.keepalive_thread:
-            try:
-                # Give the thread a chance to exit gracefully
-                self.keepalive_thread.join(timeout=1.0)
-                
-                # If thread is still alive, we need more aggressive measures
-                if self.keepalive_thread.is_alive():
-                    print("[video] Warning: Keepalive thread did not terminate gracefully")
-                    # We can't forcibly kill threads in Python, but we've set the flag
-                    # which should prevent further commands from being sent
-            except RuntimeError:
-                # Thread may already be dead
-                pass
-            
-            self.keepalive_thread = None
+            self.keepalive_thread.join()
     
     def _keepalive_loop(self, interval):
         """Periodically send start command to maintain video stream"""
-        while self.running:
+        while not self._stop_evt.is_set():
             self.send_start_command()
-            time.sleep(interval)
+            # wait() returns early when _stop_evt is set
+            self._stop_evt.wait(interval)
