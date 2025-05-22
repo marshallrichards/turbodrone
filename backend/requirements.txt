@@ -3,3 +3,15 @@ numpy>=1.19.2
 
 # OpenCV bindings (for cv2)
 opencv-python>=4.5.1.48
+
+# FastAPI
+fastapi
+
+# Uvicorn
+uvicorn[standard]
+
+# Python-multipart
+python-multipart
+
+# Starlette
+starlette

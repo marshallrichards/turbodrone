@@ -39,6 +39,16 @@ class FlightController:
         elif control == 'roll':
             self.roll_dir = direction
             
+    def set_axes(self, throttle: float, yaw: float, pitch: float, roll: float) -> None:
+        """
+        Atomically update all four stick directions.
+        Each value is expected in the range [-1.0 … +1.0].
+        """
+        self.throttle_dir = max(-1.0, min(1.0, throttle))
+        self.yaw_dir      = max(-1.0, min(1.0, yaw))
+        self.pitch_dir    = max(-1.0, min(1.0, pitch))
+        self.roll_dir     = max(-1.0, min(1.0, roll))
+            
     def _control_loop(self):
         """Background thread for sending control updates"""
         prev_time = time.time()

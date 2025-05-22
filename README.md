@@ -26,9 +26,9 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
 
 
 ## Setup
-Move to the `src` directory
+Move to the `backend` directory
 ```
-cd src
+cd backend
 ```
 
 Add venv
@@ -49,14 +49,14 @@ pip install windows-curses
 
 Make sure WiFi Dongle is plugged in, drone is turned on, connect to the "BRAND-MODEL-XXXXXX" network before proceeding.
 
-To run the video viewer, run: 
+To use remote controls only, run: 
 ```
-python receive_video.py
+python main.py
 ```
 
-To control the drone from the CLI client, run:
+To do RC + video viewer, run:
 ```
-python remote_control.py
+python main.py --with-video
 ```
 Make sure to fly in a safe area, preferably outdoors with little wind. And note that the "Land" button _currently_ is more of a E-stop button that will stop the drone motors immediately.
 
