@@ -1,20 +1,16 @@
 import { WSClient } from "./lib/ws";
 import { useControls } from "./hooks/useControls";
 import VideoFeed from "./components/VideoFeed";
+import ControlsOverlay from "./components/ControlsOverlay";
 
-function App() {
+export default function App() {
   const ws = new WSClient();
-  useControls(ws);
+  const axes = useControls(ws);      // <- now returns live axes
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white flex flex-col gap-4 p-4">
-      <h1 className="text-2xl font-bold">Turbodrone Web Client</h1>
+    <div className="relative min-h-screen bg-black text-white">
       <VideoFeed />
-      <p className="opacity-70">
-        Control with: WASD / arrow keys or gamepad controller.  q to quit video window (desktop build).
-      </p>
+      <ControlsOverlay axes={axes} />
     </div>
   );
 }
-
-export default App;

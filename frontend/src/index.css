@@ -1,3 +1,22 @@
+@import "tailwindcss";
+
+/* tech-y heading font */
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap');
+
+/* global dark theme */
+html, body {
+  margin: 0;
+  height: 100%;
+  background-color: #1e1e1e;   /* VS Code / Cursor dark */
+  color: #d4d4d4;
+  font-family: system-ui, sans-serif;
+}
+
+/* make the Heading font available as `font-heading` in Tailwind */
+@layer utilities {
+  .font-heading { font-family: 'Rajdhani', ui-sans-serif, sans-serif; }
+}
+
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
@@ -24,9 +43,14 @@ a:hover {
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
+  /* remove flex-box centring so children can use the full width */
   min-width: 320px;
+  min-height: 100vh;
+}
+
+/* make sure the React root really spans the viewport */
+#root {
+  width: 100%;
   min-height: 100vh;
 }
 

@@ -1,129 +1,162 @@
+"""web_server.py – FastAPI bridge
+----------------------------------------------------------------
+* Streams MJPEG at `/mjpeg`
+* Accepts joystick/game-pad JSON over `/ws`
+----------------------------------------------------------------
+"""
+
+from __future__ import annotations
+
 import asyncio
-import io
 import os
+import queue
 from typing import Optional
 
 import cv2
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 
+# ───────────────────────────────────────────────────────────────
+# Domain-specific imports
+# ───────────────────────────────────────────────────────────────
 from models.s2x_rc import S2xDroneModel
 from protocols.s2x_rc_protocol_adapter import S2xRCProtocolAdapter
 from protocols.s2x_video_protocol import S2xVideoProtocolAdapter
 from services.flight_controller import FlightController
 from services.video_receiver import VideoReceiverService
 
-# ---------------------------------------------------------------------
-# App & CORS
-# ---------------------------------------------------------------------
+# ───────────────────────────────────────────────────────────────
+# FastAPI app + permissive CORS (tighten in production!)
+# ───────────────────────────────────────────────────────────────
 app = FastAPI(title="Drone web adapter")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # dev only – lock down in production
+    allow_origins=["*"],  # TODO: restrict in prod
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------
-# Global single-drone objects
-# ---------------------------------------------------------------------
-FRAME_Q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)
+# ───────────────────────────────────────────────────────────────
+# Global objects (single-drone)
+# ───────────────────────────────────────────────────────────────
+RAW_Q: queue.Queue = queue.Queue(maxsize=200)          # thread-safe → pump
+FRAME_Q: asyncio.Queue[bytes] = asyncio.Queue(100)     # asyncio → /mjpeg
+
 flight_controller: Optional[FlightController] = None
+receiver: Optional[VideoReceiverService] = None
 
 
-# ---------------------------------------------------------------------
-# Start drone services once, when the web server boots
-# ---------------------------------------------------------------------
+# ───────────────────────────────────────────────────────────────
+# Boot drone services at web-server startup
+# ───────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def _startup() -> None:
-    global flight_controller
+    global flight_controller, receiver
 
-    drone_ip = os.environ.get("DRONE_IP", "172.16.10.1")
-    control_port = int(os.environ.get("CONTROL_PORT", 8080))
-    video_port   = int(os.environ.get("VIDEO_PORT", 8888))
+    drone_ip = os.getenv("DRONE_IP", "172.16.10.1")
+    ctrl_port = int(os.getenv("CONTROL_PORT", 8080))
+    video_port = int(os.getenv("VIDEO_PORT", 8888))
 
-    # 1. flight
+    # 1. RC / flight
     model = S2xDroneModel()
-    rc_proto = S2xRCProtocolAdapter(drone_ip, control_port)
+    rc_proto = S2xRCProtocolAdapter(drone_ip, ctrl_port)
     flight_controller = FlightController(model, rc_proto)
     flight_controller.start()
 
     # 2. video
-    video_proto = S2xVideoProtocolAdapter(drone_ip, control_port, video_port)
-    receiver = VideoReceiverService(video_proto, FRAME_Q)
+    video_proto = S2xVideoProtocolAdapter(drone_ip, ctrl_port, video_port)
+    receiver = VideoReceiverService(video_proto, RAW_Q)
     video_proto.send_start_command()
     receiver.start()
 
-    # 3. background JPEG encoder
-    asyncio.create_task(_frame_pump())
+    # 3️. bridge thread-queue → asyncio-queue
+    asyncio.create_task(_frame_pump(RAW_Q))
 
-async def _frame_pump() -> None:
-    """
-    Pull raw VideoFrame objects from receiver.frame_queue (running in its own
-    thread), JPEG-encode them and push into the asyncio queue that the MJPEG
-    endpoint consumes.
-    """
-    import threading
-    recv_q = FRAME_Q  # alias for speed
 
-    def _worker() -> None:
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    # graceful teardown (optional)
+    if flight_controller:
+        flight_controller.stop()
+
+    if receiver:
+        receiver.stop()
+
+
+# ───────────────────────────────────────────────────────────────
+# Thread → asyncio bridge
+# ───────────────────────────────────────────────────────────────
+async def _frame_pump(src_q: queue.Queue) -> None:
+    """Convert frames to JPEG (if needed) and push into FRAME_Q."""
+    loop = asyncio.get_running_loop()
+
+    def worker() -> None:
         while True:
-            frame = receiver_frame_q.get()         # type: ignore
-            ok, jpg = cv2.imencode(".jpg", frame.data)
-            if ok:
-                try:
-                    recv_q.put_nowait(jpg.tobytes())
-                except asyncio.QueueFull:
-                    pass  # drop if browser is too slow
+            frame = src_q.get()  # blocks in thread
+            if frame is None:
+                continue
 
-    # locate the queue inside the VideoReceiverService object
-    receiver_frame_q = None
-    for t in threading.enumerate():
-        if hasattr(t, "name") and t.name.startswith("VideoReceiver"):
-            # meh: rely on private attribute – fine for now
-            receiver_frame_q = t._target.__self__.frame_queue  # type: ignore
-            break
+            # Already JPEG?
+            if getattr(frame, "format", "jpeg") == "jpeg":
+                jpg_bytes: bytes = frame.data
+            else:
+                ok, jpg = cv2.imencode(".jpg", frame.data)
+                if not ok:
+                    continue
+                jpg_bytes = jpg.tobytes()
 
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _worker)
+            # hand off to event loop safely
+            try:
+                loop.call_soon_threadsafe(FRAME_Q.put_nowait, jpg_bytes)
+            except asyncio.QueueFull:
+                # consumer (browser) too slow – drop frame
+                pass
+
+    # run worker in default ThreadPoolExecutor
+    await asyncio.to_thread(worker)
 
 
-# ---------------------------------------------------------------------
-# MJPEG endpoint
-# ---------------------------------------------------------------------
+# ───────────────────────────────────────────────────────────────
+# MJPEG HTTP endpoint
+# ───────────────────────────────────────────────────────────────
 @app.get("/mjpeg")
 async def mjpeg() -> StreamingResponse:
     boundary = b"--frame"
 
-    async def _gen():
+    async def generator():
         while True:
             jpg = await FRAME_Q.get()
-            yield boundary + b"\r\n"
-            yield b"Content-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n"
+            yield (
+                boundary + b"\r\n"
+                + f"Content-Length: {len(jpg)}\r\n".encode()
+                + b"Content-Type: image/jpeg\r\n\r\n"
+                + jpg + b"\r\n"
+            )
 
-    headers = {"Cache-Control": "no-cache"}
-    media_type = "multipart/x-mixed-replace; boundary=frame"
-    return StreamingResponse(_gen(), media_type=media_type, headers=headers)
+    return StreamingResponse(
+        generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
-# ---------------------------------------------------------------------
-# WebSocket → flight controller
-# ---------------------------------------------------------------------
+# ───────────────────────────────────────────────────────────────
+# WebSocket -> flight controller
+# ───────────────────────────────────────────────────────────────
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     await ws.accept()
     try:
         while True:
             data = await ws.receive_json()
-            if data.get("type") == "axes":
-                fc = flight_controller
-                if fc:
-                    fc.set_axes(
-                        data.get("throttle", 0.0),
-                        data.get("yaw", 0.0),
-                        data.get("pitch", 0.0),
-                        data.get("roll", 0.0),
-                    )
+            if data.get("type") == "axes" and flight_controller:
+                flight_controller.set_axes(
+                    data.get("throttle", 0.0),
+                    data.get("yaw", 0.0),
+                    data.get("pitch", 0.0),
+                    data.get("roll", 0.0),
+                )
     except WebSocketDisconnect:
         pass
