@@ -66,6 +66,8 @@ Video feed: solid.
 
 Controls: initial version out now. A little bit rough, still working on smoothing out the accel and decel on keypresses. 
 
+Web Client: in-progress.
+
 Also working on adding support for more drones from [Amazon's best-selling drone list](https://www.amazon.com/best-selling-drones/s?k=best+selling+drones).
 
 
