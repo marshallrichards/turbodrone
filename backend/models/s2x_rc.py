@@ -1,16 +1,18 @@
 # S20 & S29 Controller model
 
 from models.base_rc import BaseRCModel
+from models.control_profile import PRESETS, ControlProfile
+from control.strategies import IncrementalStrategy
+from models.stick_range import StickRange
 
 class S2xDroneModel(BaseRCModel):
     """Model for S2x protocol drones (S20, S29)"""
     
-    def __init__(self):
-        # stick midpoints = 128.0
-        self.yaw = 128.0
-        self.throttle = 128.0
-        self.pitch = 128.0
-        self.roll = 128.0
+    STICK_RANGE = StickRange(60, 128, 200)   # ← tailorable per drone
+
+    def __init__(self, profile: ControlProfile = PRESETS["normal"]):
+        super().__init__(self.STICK_RANGE, profile)
+        self.strategy = IncrementalStrategy()   # default
 
         # one-shot flags
         self.takeoff_flag = False
@@ -23,22 +25,17 @@ class S2xDroneModel(BaseRCModel):
         self.speed = 20    # matches 0x14 from dumps
         self.record_state = 0  # bit 2 in byte 7
 
-        # Control parameters
-        self.min_control_value = 60.0
-        self.max_control_value = 200.0
-        self.center_value = 128.0
-        
-        # Control response parameters
-        self.accel_rate = 150.0
-        self.decel_rate = 350.0
-        self.expo_factor = 0.5
-        self.immediate_response = 3.0
-        
+        # response parameters from profile
+        self._apply_profile(profile)
+
         # Track last direction for each axis
         self.last_throttle_dir = 0
         self.last_yaw_dir = 0
         self.last_pitch_dir = 0
         self.last_roll_dir = 0
+    
+    def update(self, dt, axes):
+        self.strategy.update(self, dt, axes)
     
     def update_axes(self, dt, throttle_dir, yaw_dir, pitch_dir, roll_dir):
         """Apply acceleration or deceleration for each axis."""
@@ -114,27 +111,41 @@ class S2xDroneModel(BaseRCModel):
     def get_control_state(self):
         """Get current control state as a dict"""
         return {
-            "throttle": self.throttle,
-            "yaw": self.yaw,
-            "pitch": self.pitch,
-            "roll": self.roll,
-            "recording": self.record_state > 0
+            "throttle":  self.throttle,
+            "yaw":       self.yaw,
+            "pitch":     self.pitch,
+            "roll":      self.roll,
+            "recording": self.record_state > 0,
         }
         
     def set_sensitivity(self, preset):
         """Set control sensitivity parameters"""
         if preset == 0:  # Normal
-            self.accel_rate = 150.0
-            self.decel_rate = 350.0
-            self.expo_factor = 0.5
-            self.immediate_response = 3.0
+            self._apply_profile(PRESETS["normal"])
         elif preset == 1:  # Precise
-            self.accel_rate = 100.0
-            self.decel_rate = 400.0
-            self.expo_factor = 0.3
-            self.immediate_response = 1.5
+            self._apply_profile(PRESETS["precise"])
         else:  # Aggressive
-            self.accel_rate = 300.0
-            self.decel_rate = 280.0
-            self.expo_factor = 1.5
-            self.immediate_response = 15.0
+            self._apply_profile(PRESETS["aggressive"])
+
+    def set_profile(self, name: str) -> None:
+        if name in PRESETS:
+            self._apply_profile(PRESETS[name])
+
+    def set_strategy(self, strategy) -> None:
+        self.strategy = strategy
+
+    def _apply_profile(self, profile: ControlProfile):
+        self.profile = profile
+        self.accel_rate         = profile.accel_rate
+        self.decel_rate         = profile.decel_rate
+        self.expo_factor        = profile.expo_factor
+        self.immediate_response = profile.immediate_response
+
+    def _update_axes_incremental(self, dt, axes):
+        self.update_axes(
+            dt,
+            axes.get("throttle", 0),
+            axes.get("yaw",      0),
+            axes.get("pitch",    0),
+            axes.get("roll",     0),
+        )

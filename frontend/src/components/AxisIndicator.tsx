@@ -13,7 +13,6 @@ export default function AxisIndicator({ x, y, size = 120, label }: Props) {
   y = Math.max(-1, Math.min(1, y));
 
   const radius = size * 0.4;            // max travel inside the square
-  const translate = `translate(${x * radius}px, ${-y * radius}px)`;
 
   return (
     <div className="flex flex-col items-center gap-1">
@@ -26,9 +25,12 @@ export default function AxisIndicator({ x, y, size = 120, label }: Props) {
         <div className="absolute inset-0 m-auto w-px h-full bg-slate-500/40" />
         {/* moving dot */}
         <div
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2
-                     w-4 h-4 rounded-full bg-emerald-400 shadow-lg"
-          style={{ transform: `translate(-50%, -50%) ${translate}` }}
+          className="absolute w-4 h-4 rounded-full bg-emerald-400 shadow-lg"
+          style={{ 
+            left: `calc(50% + ${x * radius}px)`,
+            top: `calc(50% + ${-y * radius}px)`,
+            transform: 'translate(-50%, -50%)'
+          }}
         />
       </div>
       {label && <span className="text-xs tracking-wide opacity-70">{label}</span>}

@@ -1,7 +1,14 @@
 import AxisIndicator from "./AxisIndicator";
 import type { Axes } from "../hooks/useControls";
+import CommandButtons from "./CommandButtons";
 
-export default function ControlsOverlay({ axes }: { axes: Axes }) {
+interface ControlsOverlayProps {
+  axes: Axes;
+  onTakeoff: () => void;
+  onLand: () => void;
+}
+
+export default function ControlsOverlay({ axes, onTakeoff, onLand }: ControlsOverlayProps) {
   const left   = { x: axes.roll,     y: axes.pitch };
   const right  = { x: axes.yaw,      y: axes.throttle };
 
@@ -23,10 +30,16 @@ export default function ControlsOverlay({ axes }: { axes: Axes }) {
         </h1>
       </div>
 
-      {/* sticks */}
-      <div className="absolute bottom-8 left-8 flex gap-10 z-20">
-        <AxisIndicator {...left}  label="PITCH / ROLL" />
-        <AxisIndicator {...right} label="YAW / THROTTLE" />
+      {/* Controls Area: Buttons and Sticks */}
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-5 z-20 pointer-events-auto">
+        {/* Command Buttons Cluster */}
+        <CommandButtons onTakeoff={onTakeoff} onLand={onLand} />
+
+        {/* Sticks */}
+        <div className="flex gap-10">
+          <AxisIndicator {...left}  label="PITCH / ROLL" />
+          <AxisIndicator {...right} label="YAW / THROTTLE" />
+        </div>
       </div>
     </div>
   );

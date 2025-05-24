@@ -55,7 +55,7 @@ class S2xRCProtocolAdapter(BaseProtocolAdapter):
         drone_model.land_flag = False
         drone_model.stop_flag = False
 
-        return pkt
+        return bytes(pkt)
         
     def send_control_packet(self, packet):
         """Send the control packet to the drone"""

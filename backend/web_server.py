@@ -11,6 +11,7 @@ import asyncio
 import os
 import queue
 from typing import Optional
+import threading
 
 import cv2
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -25,6 +26,7 @@ from protocols.s2x_rc_protocol_adapter import S2xRCProtocolAdapter
 from protocols.s2x_video_protocol import S2xVideoProtocolAdapter
 from services.flight_controller import FlightController
 from services.video_receiver import VideoReceiverService
+from control.strategies import DirectStrategy, IncrementalStrategy
 
 # ───────────────────────────────────────────────────────────────
 # FastAPI app + permissive CORS (tighten in production!)
@@ -47,13 +49,15 @@ FRAME_Q: asyncio.Queue[bytes] = asyncio.Queue(100)     # asyncio → /mjpeg
 flight_controller: Optional[FlightController] = None
 receiver: Optional[VideoReceiverService] = None
 
+video_keepalive: "VideoKeepAlive | None" = None
+
 
 # ───────────────────────────────────────────────────────────────
 # Boot drone services at web-server startup
 # ───────────────────────────────────────────────────────────────
 @app.on_event("startup")
-async def _startup() -> None:
-    global flight_controller, receiver
+async def startup_event() -> None:
+    global flight_controller, receiver, video_keepalive
 
     drone_ip = os.getenv("DRONE_IP", "172.16.10.1")
     ctrl_port = int(os.getenv("CONTROL_PORT", 8080))
@@ -71,18 +75,22 @@ async def _startup() -> None:
     video_proto.send_start_command()
     receiver.start()
 
-    # 3️. bridge thread-queue → asyncio-queue
+    # 3. bridge thread-queue → asyncio-queue
     asyncio.create_task(_frame_pump(RAW_Q))
+
+    # 4. keep-alive pinger (reuse same proto)
+    video_keepalive = VideoKeepAlive(send_start_cmd=video_proto.send_start_command)
+    video_keepalive.start()
 
 
 @app.on_event("shutdown")
-async def _shutdown() -> None:
-    # graceful teardown (optional)
+async def shutdown_event() -> None:
     if flight_controller:
         flight_controller.stop()
-
     if receiver:
         receiver.stop()
+    if video_keepalive:
+        video_keepalive.stop()
 
 
 # ───────────────────────────────────────────────────────────────
@@ -151,12 +159,59 @@ async def ws_endpoint(ws: WebSocket) -> None:
     try:
         while True:
             data = await ws.receive_json()
-            if data.get("type") == "axes" and flight_controller:
+            if data["type"] == "axes":
+                mode = data.get("mode", "abs")
+                if mode == "abs":
+                    if not isinstance(flight_controller.model.strategy, DirectStrategy):
+                        flight_controller.model.set_strategy(DirectStrategy())
+                else:   # "inc"
+                    if not isinstance(flight_controller.model.strategy, IncrementalStrategy):
+                        flight_controller.model.set_strategy(IncrementalStrategy())
+
                 flight_controller.set_axes(
-                    data.get("throttle", 0.0),
-                    data.get("yaw", 0.0),
-                    data.get("pitch", 0.0),
-                    data.get("roll", 0.0),
+                    data["throttle"], data["yaw"], data["pitch"], data["roll"]
                 )
+            elif data["type"] == "set_profile":
+                flight_controller.model.set_profile(data["name"])
+            elif data["type"] == "takeoff":
+                if flight_controller and hasattr(flight_controller.model, 'takeoff'):
+                    flight_controller.model.takeoff()
+                    print("[WebSocket] Takeoff command received")
+            elif data["type"] == "land":
+                if flight_controller and hasattr(flight_controller.model, 'land'):
+                    flight_controller.model.land()
+                    print("[WebSocket] Land command received")
     except WebSocketDisconnect:
-        pass
+        print("[WebSocket] Client disconnected")
+        # Optionally, reset controls or land the drone if appropriate
+        # if flight_controller and hasattr(flight_controller.model, 'land'):
+        #     flight_controller.model.land() # Example: auto-land on disconnect
+    except Exception as e:
+        print(f"[WebSocket] Error: {e}")
+
+
+class VideoKeepAlive:
+    """Periodically sends a start-stream command to the drone until stopped."""
+
+    def __init__(self, send_start_cmd, interval: float = 2.0):
+        self._send_start_cmd = send_start_cmd
+        self._interval       = interval
+        self._stop           = threading.Event()
+        self._thread         = threading.Thread(
+            target=self._loop,
+            name="VideoKeepAlive",
+            daemon=True
+        )
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        self._thread.join(timeout=1.0)
+
+    def _loop(self):
+        while not self._stop.is_set():
+            self._send_start_cmd()
+            # wait() lets us wake up immediately on stop()
+            self._stop.wait(self._interval)

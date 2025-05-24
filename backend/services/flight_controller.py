@@ -59,13 +59,12 @@ class FlightController:
             prev_time = now
             
             # Update drone controls based on input directions
-            self.model.update_axes(
-                dt,
-                self.throttle_dir,
-                self.yaw_dir,
-                self.pitch_dir,
-                self.roll_dir
-            )
+            self.model.update(dt, {
+                "throttle": self.throttle_dir,   # still -1…+1
+                "yaw":      self.yaw_dir,
+                "pitch":    self.pitch_dir,
+                "roll":     self.roll_dir,
+            })
             
             # Build and send packet
             packet = self.protocol.build_control_packet(self.model)
