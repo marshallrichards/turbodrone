@@ -76,9 +76,9 @@ Make sure to fly in a safe area, preferably outdoors with little wind. And note 
 ## Status
 Video feed: solid.
 
-Controls: initial version out now. A little bit rough, still working on smoothing out the accel and decel on keypresses. 
+Controls: improved greatly via the web client. 
 
-Web Client: in-progress.
+Web Client: first version is out now.
 
 Also working on adding support for more drones from [Amazon's best-selling drone list](https://www.amazon.com/best-selling-drones/s?k=best+selling+drones).
 
