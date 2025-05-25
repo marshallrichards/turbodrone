@@ -119,7 +119,7 @@ export function useControls(ws: WSClient): {
   useEffect(() => {
     if (modeRef.current !== "abs") return;          // ignore when in inc mode
 
-    const DEADZONE = 0.1; // Adjust this value as needed
+    const DEADZONE = 0.15; // Adjust this value as needed
     let raf = 0;
 
     const applyDeadzone = (value: number): number => {

@@ -51,6 +51,12 @@ receiver: Optional[VideoReceiverService] = None
 
 video_keepalive: "VideoKeepAlive | None" = None
 
+# ───────────────────────────────────────────────────────────────
+# Globals to track the pump
+# ───────────────────────────────────────────────────────────────
+_pump_stop: threading.Event | None = None
+_pump_thread: threading.Thread | None = None
+
 
 # ───────────────────────────────────────────────────────────────
 # Boot drone services at web-server startup
@@ -75,8 +81,19 @@ async def startup_event() -> None:
     video_proto.send_start_command()
     receiver.start()
 
-    # 3. bridge thread-queue → asyncio-queue
-    asyncio.create_task(_frame_pump(RAW_Q))
+    # 3. start bridge thread (daemon)
+    global _pump_stop, _pump_thread
+    _pump_stop = threading.Event()
+
+    main_loop = asyncio.get_running_loop()        # <- capture here!
+
+    _pump_thread = threading.Thread(
+        target=_frame_pump_worker,
+        args=(RAW_Q, _pump_stop, main_loop),      # <- pass it in
+        name="FramePump",
+        daemon=True,
+    )
+    _pump_thread.start()
 
     # 4. keep-alive pinger (reuse same proto)
     video_keepalive = VideoKeepAlive(send_start_cmd=video_proto.send_start_command)
@@ -91,39 +108,48 @@ async def shutdown_event() -> None:
         receiver.stop()
     if video_keepalive:
         video_keepalive.stop()
+    # stop frame-pump
+    if _pump_stop:
+        _pump_stop.set()
+    if _pump_thread:
+        _pump_thread.join(timeout=1.0)
 
 
 # ───────────────────────────────────────────────────────────────
-# Thread → asyncio bridge
+# Frame-pump implementation
 # ───────────────────────────────────────────────────────────────
-async def _frame_pump(src_q: queue.Queue) -> None:
-    """Convert frames to JPEG (if needed) and push into FRAME_Q."""
-    loop = asyncio.get_running_loop()
+def _frame_pump_worker(
+    src_q: queue.Queue,
+    stop_evt: threading.Event,
+    loop: asyncio.AbstractEventLoop,       # <-- receive main loop
+) -> None:
+    """
+    Convert incoming frames to JPEG (if needed) and pass them into the
+    asyncio queue.  Runs in its own *daemon* thread.
+    """
 
-    def worker() -> None:
-        while True:
-            frame = src_q.get()  # blocks in thread
-            if frame is None:
+    while not stop_evt.is_set():
+        try:
+            frame = src_q.get(timeout=0.5)
+        except queue.Empty:
+            continue
+        if frame is None:                     # sentinel
+            break
+
+        # --- JPEG encode -------------------------------------------------
+        if getattr(frame, "format", "jpeg") == "jpeg":
+            jpg_bytes: bytes = frame.data
+        else:
+            ok, jpg = cv2.imencode(".jpg", frame.data)
+            if not ok:
                 continue
+            jpg_bytes = jpg.tobytes()
+        # -----------------------------------------------------------------
 
-            # Already JPEG?
-            if getattr(frame, "format", "jpeg") == "jpeg":
-                jpg_bytes: bytes = frame.data
-            else:
-                ok, jpg = cv2.imencode(".jpg", frame.data)
-                if not ok:
-                    continue
-                jpg_bytes = jpg.tobytes()
-
-            # hand off to event loop safely
-            try:
-                loop.call_soon_threadsafe(FRAME_Q.put_nowait, jpg_bytes)
-            except asyncio.QueueFull:
-                # consumer (browser) too slow – drop frame
-                pass
-
-    # run worker in default ThreadPoolExecutor
-    await asyncio.to_thread(worker)
+        try:
+            loop.call_soon_threadsafe(FRAME_Q.put_nowait, jpg_bytes)
+        except asyncio.QueueFull:
+            pass
 
 
 # ───────────────────────────────────────────────────────────────
