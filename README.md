@@ -47,17 +47,29 @@ _If_ you are on Windows, you will need to manually install the `curses` library.
 pip install windows-curses
 ```
 
+Open a new terminal window and install the dependencies for the frontend.
+_Make sure you have Node.js 20+ installed._
+```
+cd frontend
+npm install
+```
+
 Make sure WiFi Dongle is plugged in, drone is turned on, connect to the "BRAND-MODEL-XXXXXX" network before proceeding.
 
-To use remote controls only, run: 
+Launch the backend: 
 ```
-python main.py
+uvicorn web_server:app
 ```
 
-To do RC + video viewer, run:
+Launch the frontend web client:
 ```
-python main.py --with-video
+npm run dev
 ```
+
+Open the web client which will be at `http://localhost:5173` and you should see the drone video feed and be able to control it.
+
+To control via a gaming controller, plug it in and move the sticks around for it to be detected and then push the toggle button to switch between keyboard and controller control.
+
 Make sure to fly in a safe area, preferably outdoors with little wind. And note that the "Land" button _currently_ is more of a E-stop button that will stop the drone motors immediately.
 
 
