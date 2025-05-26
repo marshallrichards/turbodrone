@@ -100,7 +100,7 @@ class VideoReceiverService:
             print(f"[receiver] JPEG markers missing on frame {frame_id}")
             return None
         
-        jpeg_data = data[start : end + 2]
+        jpeg_data = data[start : end + len(self.protocol.EOI_MARKER)] # Extract JPEG data including markers
         
         # Dump frame if requested
         if self.dump_frames:
@@ -108,7 +108,7 @@ class VideoReceiverService:
             with open(os.path.join(self.dump_dir, f"frame_{frame_id:02x}_{ts}.jpg"), "wb") as f:
                 f.write(jpeg_data)
         
-        print(f"[receiver] Frame {frame_id} complete - {len(jpeg_data)} bytes")
+        print(f"[receiver] Frame {frame_id} assembled - {len(jpeg_data)} bytes from {len(keys)} slices ({keys[0]}..{keys[-1]}).")
         
         # Create frame model
         return VideoFrame(frame_id, jpeg_data, "jpeg")
@@ -141,11 +141,11 @@ class VideoReceiverService:
                 slice_id = packet_data["slice_id"]
                 payload = packet_data["payload"]
                 
-                if slice_id % 20 == 0:  # Throttle the spam
-                    head = payload[:8].hex()
-                    ascii_payload = payload[:8].decode('ascii', errors='replace')
-                    print(f"[slice] FID=0x{frame_id:02x} SID={slice_id:3d} "
-                          f"head={head} ascii={ascii_payload!r}")
+                # if slice_id % 20 == 0:  # Throttle the spam
+                #     head = payload[:8].hex()
+                #     ascii_payload = payload[:8].decode('ascii', errors='replace')
+                #     print(f"[slice] FID=0x{frame_id:02x} SID={slice_id:3d} "
+                #           f"head={head} ascii={ascii_payload!r}")
                 
                 # New frame detected?
                 if self._current_frame_id is None:
@@ -163,13 +163,6 @@ class VideoReceiverService:
                 # Stash this slice (ignore dupes)
                 if slice_id not in self._fragments:
                     self._fragments[slice_id] = payload
-                
-                # If this is marked as the last slice, try to assemble immediately
-                if packet_data.get("is_last_slice") and len(self._fragments) > 1:
-                    frame = self._assemble_frame(frame_id)
-                    if frame:
-                        self.frame_queue.put(frame)
-                        self._reset_frame(None)  # Ready for next frame
         
         finally:
             sock.close() 
