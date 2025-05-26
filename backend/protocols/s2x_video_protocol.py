@@ -10,6 +10,7 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
     SYNC_BYTES = b"\x40\x40"
     SOI_MARKER = b"\xFF\xD8"
     EOI_MARKER = b"\xFF\xD9"
+    EOS_MARKER = b"\x23\x23"
     HEADER_LEN = 8
     
     def __init__(self, drone_ip="172.16.10.1", control_port=8080, video_port=8888):
@@ -50,16 +51,11 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
             
         frame_id = packet[2]
         slice_id = packet[5]
-        
-        # Extract payload based on header format
-        if packet[6] == 0x78 and packet[7] == 0x05:
-            payload = packet[8:]
-        else:
-            payload = packet[6:]
-        
-        # Strip trailing 0x23 0x23 if present
-        if payload.endswith(b"\x23\x23"):
-            payload = payload[:-2]
+        payload = packet[8:]
+    
+        # Strip end-of-slice marker
+        if payload.endswith(self.EOS_MARKER):
+            payload = payload[:-len(self.EOS_MARKER)]
             
         return {
             "frame_id": frame_id,
