@@ -26,7 +26,7 @@ export default function ControlsOverlay({ axes, onTakeoff, onLand }: ControlsOve
             padding: 0
           }}
         >
-          TURBORONE WEB
+          TURBODRONE WEB
         </h1>
       </div>
 
