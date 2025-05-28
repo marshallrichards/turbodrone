@@ -8,8 +8,8 @@ from models.video_frame import VideoFrame
 
 class BaseVideoProtocolAdapter(ABC):
     """
-    Owns transport (UDP socket, keep-alives) and converts raw datagrams
-    into VideoFrame objects via an inner VideoModel.
+    Owns transport (UDP or TCP socket, keep-alives) and converts
+    raw payloads into VideoFrame objects via an inner VideoModel.
     """
 
     def __init__(self, drone_ip: str, control_port: int, video_port: int):
@@ -42,6 +42,19 @@ class BaseVideoProtocolAdapter(ABC):
             self.send_start_command()
             self._stop_evt.wait(interval)
 
+    # ────────── transport helpers ────────── #
+    def recv_from_socket(self, sock) -> Optional[bytes]:
+        """
+        Read one payload chunk from `sock`.
+
+        The default implementation assumes UDP; override for TCP.
+        """
+        try:
+            pkt, _ = sock.recvfrom(4096)
+            return pkt
+        except socket.timeout:
+            return None
+
     # ────────── abstract API ────────── #
     @abstractmethod
     def send_start_command(self) -> None:
@@ -50,13 +63,13 @@ class BaseVideoProtocolAdapter(ABC):
 
     @abstractmethod
     def create_receiver_socket(self) -> socket.socket:
-        """Return a configured UDP socket bound for recvfrom()."""
+        """Return a configured socket ready for recv()."""
         raise NotImplementedError
 
     @abstractmethod
-    def handle_datagram(self, datagram: bytes) -> Optional[VideoFrame]:
+    def handle_payload(self, payload: bytes) -> Optional[VideoFrame]:
         """
-        Parse one UDP datagram and return a VideoFrame if (and only if)
-        a whole frame is now complete.
+        Convert one transport payload into a VideoFrame or return None
+        if the frame is not yet complete.
         """
         raise NotImplementedError

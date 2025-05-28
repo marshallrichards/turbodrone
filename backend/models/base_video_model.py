@@ -3,11 +3,40 @@ from typing import Optional
 from models.video_frame import VideoFrame
 
 class BaseVideoModel(ABC):
+    """
+    Stateless interface that turns *chunks* (whatever the protocol
+    thinks a chunk is: a JPEG slice, a whole JPEG, a H.264 NALU …)
+    into complete VideoFrame objects.
+    """
+
     @abstractmethod
-    def ingest_slice(self, *, frame_id: int, slice_id: int,
-                     payload: bytes, is_last: bool) -> Optional[VideoFrame]:
+    def ingest_chunk(
+        self,
+        *,
+        stream_id: int | None = None,
+        chunk_id: int | None = None,
+        payload: bytes,
+        is_last: bool | None = None
+    ) -> Optional[VideoFrame]:
         """
-        Feed one video slice into the model.
-        Return a VideoFrame only when a full frame is ready.
+        Feed one chunk into the model.
+
+        Parameters
+        ----------
+        stream_id : int | None
+            Identifier of the logical stream / frame (e.g. frame number).
+        chunk_id  : int | None
+            Sequential id of this chunk inside the stream (e.g. slice index).
+        payload   : bytes
+            Raw codec payload (JPEG slice, NALU, etc.).
+        is_last   : bool | None
+            True if this is the final chunk of the stream, False otherwise,
+            None if the protocol cannot tell.
+
+        Returns
+        -------
+        Optional[VideoFrame]
+            • VideoFrame when a frame is complete
+            • None if more data is required
         """
-        ...
+        raise NotImplementedError
