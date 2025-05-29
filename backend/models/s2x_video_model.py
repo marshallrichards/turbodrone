@@ -12,10 +12,8 @@ class S2xVideoModel(BaseVideoModel):
     • Finishes a frame when the frame-id rolls over.
     """
 
-    SYNC_BYTES  = b"\x40\x40"
-    SOI_MARKER  = b"\xFF\xD8"
-    EOI_MARKER  = b"\xFF\xD9"
-    EOS_MARKER  = b"\x23\x23"
+    SOI_MARKER = b"\xFF\xD8"
+    EOI_MARKER = b"\xFF\xD9"
 
     def __init__(self) -> None:
         self._cur_fid: Optional[int] = None
@@ -28,19 +26,19 @@ class S2xVideoModel(BaseVideoModel):
         self,
         *,
         stream_id: int | None = None,
-        chunk_id:  int | None = None,
-        payload:   bytes,
+        chunk_id: int | None = None,
+        payload: bytes,
     ) -> Optional[VideoFrame]:
 
         if stream_id is None or chunk_id is None:
-            return None   # S2x packets always carry both ids
+            return None  # S2x packets always carry both ids
 
-        # frame-id changed?  → finish previous frame
+        # frame-id changed? → finish previous frame
         completed: Optional[VideoFrame] = None
         if self._cur_fid is None:
             self._cur_fid = stream_id
         elif stream_id != self._cur_fid:
-            completed = self._assemble_current()        # may be None
+            completed = self._assemble_current()      # may be None
             self._reset(stream_id)
 
         # stash slice (ignore duplicates)
