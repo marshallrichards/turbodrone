@@ -56,7 +56,14 @@ class OpenCVVideoView(BaseVideoView):
             else:
                 # Handle different frame formats
                 if frame.format == "jpeg":
-                    arr = np.frombuffer(frame.data, dtype=np.uint8)
+                    # wrap in a file‐like buffer
+                    frame_buffer = io.BytesIO(frame.data)
+                    clean_buffer = io.BytesIO()
+                    with Image.open(frame_buffer) as clean_img:
+                        clean_img.save(clean_buffer, format="JPEG")
+                    clean_buffer.seek(0)
+                    clean_bytes = clean_buffer.read()
+                    arr = np.frombuffer(clean_bytes, dtype=np.uint8)
                     decoded = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                     if decoded is None:
                         print(f"[display] ⚠ imdecode failed ({len(arr)} bytes)")
