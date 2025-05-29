@@ -3,7 +3,7 @@ import { WSClient } from "../lib/ws";
 
 /* ─────────────────────────────────────────────────────────── */
 /*  Shared types                                               */
-export type ControlMode = "inc" | "abs";
+export type ControlMode = "inc" | "abs" | "mouse";
 
 export interface Axes {
   throttle: number;  // -1 … +1  (down / up)
@@ -146,11 +146,56 @@ export function useControls(ws: WSClient): {
     return () => cancelAnimationFrame(raf);
   }, [mode]);
 
-  /* --------------- network TX 30 Hz --------------- */
+  /* ---------- TrackPoint / Mouse (relative) ------------------ */
+  useEffect(() => {
+    if (modeRef.current !== "mouse") return;
+
+    const sensitivity = 0.015;      // tune to taste for TrackPoint
+    const decay       = 0.90;       // spring-back to centre when idle
+    let rafId = 0;
+
+    /* convert mouse deltas → roll / pitch  (-y = pitch forward) */
+    const onMove = (e: MouseEvent) => {
+      axesRef.current.roll  = Math.max(-1, Math.min(1, axesRef.current.roll  +  e.movementX * sensitivity));
+      axesRef.current.pitch = Math.max(-1, Math.min(1, axesRef.current.pitch - e.movementY * sensitivity));
+      setAxes({ ...axesRef.current });
+    };
+
+    /* gentle recentre so sticks don't stay deflected forever */
+    const tick = () => {
+      axesRef.current.roll  *= decay;
+      axesRef.current.pitch *= decay;
+      if (Math.abs(axesRef.current.roll)  < 0.001) axesRef.current.roll  = 0;
+      if (Math.abs(axesRef.current.pitch) < 0.001) axesRef.current.pitch = 0;
+      setAxes({ ...axesRef.current });
+      rafId = requestAnimationFrame(tick);
+    };
+
+    /* when we lose pointer-lock (Esc, window blur, etc.) fall back to keyboard */
+    const onLockChange = () => {
+      if (document.pointerLockElement === null) {
+        setMode("inc");
+      }
+    };
+
+    window.addEventListener("mousemove",        onMove);
+    document.addEventListener("pointerlockchange", onLockChange);
+    rafId = requestAnimationFrame(tick);
+
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      document.removeEventListener("pointerlockchange", onLockChange);
+      cancelAnimationFrame(rafId);
+      axesRef.current.roll = axesRef.current.pitch = 0;
+      setAxes({ ...axesRef.current });
+    };
+  }, [mode, setMode]);
+
+  /* ----------- network TX 30 Hz (treat mouse as "abs") ------- */
   useEffect(() => {
     const id = setInterval(() => {
-      // push current axes + control mode to backend
-      ws.send({ type: "axes", mode: modeRef.current, ...axesRef.current });
+      const modeForBackend = modeRef.current === "mouse" ? "abs" : modeRef.current;
+      ws.send({ type: "axes", mode: modeForBackend, ...axesRef.current });
     }, 1000 / 30);
     return () => clearInterval(id);
   }, [ws]);
