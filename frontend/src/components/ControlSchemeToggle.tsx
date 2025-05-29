@@ -51,7 +51,9 @@ export const ControlSchemeToggle: React.FC<Props> = ({ mode, setMode, gamepadCon
           <button
             onClick={toTrackPoint}
             className={`px-3 py-1.5 rounded text-sm font-medium ${
-              mode === "mouse" ? "bg-purple-600" : "bg-gray-600 hover:bg-gray-500"
+              mode === "mouse"
+                ? "bg-red-600"
+                : "bg-gray-600 hover:bg-gray-500"
             }`}
           >
             TrackPoint
