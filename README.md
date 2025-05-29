@@ -89,6 +89,5 @@ From there, explore the java files like `HyControlConsumer.java` and `UDPHeartbe
 Additionally, Wireshark is your friend for understanding the raw data packets being sent and received. Watch this [video](https://x.com/marshallrichrds/status/1923165437698670818) for an overview into the reverse engineering process used.
 
 
-
-
-
+## Experimental Support
+For drones and apps with limited support that are not fully integrated into Turbodrone, see the `experimental` directory.
