@@ -16,7 +16,6 @@ class BaseVideoModel(ABC):
         stream_id: int | None = None,
         chunk_id: int | None = None,
         payload: bytes,
-        is_last: bool | None = None
     ) -> Optional[VideoFrame]:
         """
         Feed one chunk into the model.
@@ -29,9 +28,6 @@ class BaseVideoModel(ABC):
             Sequential id of this chunk inside the stream (e.g. slice index).
         payload   : bytes
             Raw codec payload (JPEG slice, NALU, etc.).
-        is_last   : bool | None
-            True if this is the final chunk of the stream, False otherwise,
-            None if the protocol cannot tell.
 
         Returns
         -------

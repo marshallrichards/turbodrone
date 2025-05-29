@@ -43,27 +43,22 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
         1. Validate & strip the fixed 8-byte S2x header
         2. Forward the slice payload to the model
         """
-        # Basic sanity check
         if len(payload) <= self.HEADER_LEN or payload[:2] != self.SYNC_BYTES:
             return None
 
-        frame_id = payload[2]
+        frame_id     = payload[2]
         slice_id_raw = payload[5]
-        is_last      = bool(slice_id_raw & 0x10)
 
-        # The header is always 8 bytes on current S2x drones
         body = payload[self.HEADER_LEN:]
 
-        # Strip optional end-of-slice marker "##"
+        # strip optional "##" trailer
         if body.endswith(self.EOS_MARKER):
-            body = body[: -len(self.EOS_MARKER)]
+            body = body[:-len(self.EOS_MARKER)]
 
-        # Pass the raw slice-id byte so the model sees the whole sequence
         return self.model.ingest_chunk(
             stream_id=frame_id,
             chunk_id=slice_id_raw,
             payload=body,
-            is_last=is_last,
         )
 
     # ────────── helpers ────────── #
