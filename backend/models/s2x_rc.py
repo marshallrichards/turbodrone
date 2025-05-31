@@ -1,7 +1,7 @@
 # S20 & S29 Controller model
 
 from models.base_rc import BaseRCModel
-from models.control_profile import PRESETS, ControlProfile
+from models.control_profile import ControlProfile
 from control.strategies import IncrementalStrategy
 from models.stick_range import StickRange
 
@@ -10,8 +10,16 @@ class S2xDroneModel(BaseRCModel):
     
     STICK_RANGE = StickRange(60, 128, 200)   # ← tailorable per drone
 
-    def __init__(self, profile: ControlProfile = PRESETS["normal"]):
-        super().__init__(self.STICK_RANGE, profile)
+    PRESETS = {
+        "normal":     ControlProfile("normal",     2.08, 4.86, 0.5, 0.02),
+        "precise":    ControlProfile("precise",    1.39, 5.56, 0.3, 0.01),
+        "aggressive": ControlProfile("aggressive", 4.17, 3.89, 1.5, 0.11),
+    }
+
+    def __init__(self, profile: str | ControlProfile = "normal"):
+        # BaseRCModel handles STICK_RANGE, presets and profile application
+        super().__init__(stick_range=self.STICK_RANGE, profile=profile)
+
         self.strategy = IncrementalStrategy()   # default
 
         # one-shot flags
@@ -24,9 +32,6 @@ class S2xDroneModel(BaseRCModel):
         # misc
         self.speed = 20    # matches 0x14 from dumps
         self.record_state = 0  # bit 2 in byte 7
-
-        # response parameters from profile
-        self._apply_profile(profile)
 
         # Track last direction for each axis
         self.last_throttle_dir = 0
@@ -117,29 +122,9 @@ class S2xDroneModel(BaseRCModel):
             "roll":      self.roll,
             "recording": self.record_state > 0,
         }
-        
-    def set_sensitivity(self, preset):
-        """Set control sensitivity parameters"""
-        if preset == 0:  # Normal
-            self._apply_profile(PRESETS["normal"])
-        elif preset == 1:  # Precise
-            self._apply_profile(PRESETS["precise"])
-        else:  # Aggressive
-            self._apply_profile(PRESETS["aggressive"])
-
-    def set_profile(self, name: str) -> None:
-        if name in PRESETS:
-            self._apply_profile(PRESETS[name])
 
     def set_strategy(self, strategy) -> None:
         self.strategy = strategy
-
-    def _apply_profile(self, profile: ControlProfile):
-        self.profile = profile
-        self.accel_rate         = profile.accel_rate
-        self.decel_rate         = profile.decel_rate
-        self.expo_factor        = profile.expo_factor
-        self.immediate_response = profile.immediate_response
 
     def _update_axes_incremental(self, dt, axes):
         self.update_axes(

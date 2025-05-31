@@ -1,65 +1,71 @@
 import ipaddress
 import socket
-import time
+from typing import Optional
+
+from models.s2x_video_model import S2xVideoModel
+from models.video_frame import VideoFrame
 from protocols.base_video_protocol import BaseVideoProtocolAdapter
 
+
 class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
-    """Protocol adapter for S2x drone video feed"""
-    
-    # Constants
+    """Transport + header parser for S2x JPEG stream"""
+
     SYNC_BYTES = b"\x40\x40"
-    SOI_MARKER = b"\xFF\xD8"
-    EOI_MARKER = b"\xFF\xD9"
     EOS_MARKER = b"\x23\x23"
-    HEADER_LEN = 8
-    
-    def __init__(self, drone_ip="172.16.10.1", control_port=8080, video_port=8888):
+    HEADER_LEN = 8        # S2x packets always use an 8-byte header
+
+    def __init__(
+        self,
+        drone_ip: str = "172.16.10.1",
+        control_port: int = 8080,
+        video_port: int = 8888,
+    ):
         super().__init__(drone_ip, control_port, video_port)
+        self.model = S2xVideoModel()
         self.local_ip = self._discover_local_ip()
-    
-    def _discover_local_ip(self):
-        """Discover the IP address that can reach the drone"""
+
+    # ────────── BaseVideoProtocolAdapter ────────── #
+    def send_start_command(self) -> None:
+        payload = b"\x08" + ipaddress.IPv4Address(self.local_ip).packed
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.sendto(payload, (self.drone_ip, self.control_port))
+        print(f"[video] Start command sent ({payload.hex(' ')})")
+
+    def create_receiver_socket(self) -> socket.socket:
+        """UDP socket bound to the drone's video port."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(("0.0.0.0", self.video_port))
+        sock.settimeout(1.0)
+        return sock
+
+    def handle_payload(self, payload: bytes) -> Optional[VideoFrame]:
+        """
+        1. Validate & strip the fixed 8-byte S2x header
+        2. Forward the slice payload to the model
+        """
+        if len(payload) <= self.HEADER_LEN or payload[:2] != self.SYNC_BYTES:
+            return None
+
+        frame_id     = payload[2]
+        slice_id_raw = payload[5]
+
+        body = payload[self.HEADER_LEN:]
+
+        # strip optional "##" trailer
+        if body.endswith(self.EOS_MARKER):
+            body = body[:-len(self.EOS_MARKER)]
+
+        return self.model.ingest_chunk(
+            stream_id=frame_id,
+            chunk_id=slice_id_raw,
+            payload=body,
+        )
+
+    # ────────── helpers ────────── #
+    def _discover_local_ip(self) -> str:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             s.connect((self.drone_ip, 1))
             return s.getsockname()[0]
         finally:
             s.close()
-    
-    def send_start_command(self):
-        """Send the 5-byte start video command"""
-        payload = b"\x08" + ipaddress.IPv4Address(self.local_ip).packed
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.sendto(payload, (self.drone_ip, self.control_port))
-        print(f"[video] Start command sent ({payload.hex(' ')})")
-    
-    def create_receiver_socket(self):
-        """Create and configure the UDP socket for receiving video"""
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind(("0.0.0.0", self.video_port))
-        sock.settimeout(1.0)
-        return sock
-    
-    def is_valid_packet(self, packet):
-        """Check if packet has valid S2x header"""
-        return len(packet) > self.HEADER_LEN and packet[:2] == self.SYNC_BYTES
-    
-    def parse_packet(self, packet):
-        """Parse S2x video packet and extract metadata and payload"""
-        if not self.is_valid_packet(packet):
-            return None
-            
-        frame_id = packet[2]
-        slice_id = packet[5]
-        payload = packet[8:]
-    
-        # Strip end-of-slice marker
-        if payload.endswith(self.EOS_MARKER):
-            payload = payload[:-len(self.EOS_MARKER)]
-            
-        return {
-            "frame_id": frame_id,
-            "slice_id": slice_id,
-            "payload": payload,
-            "is_last_slice": bool(slice_id & 0x10)
-        } 

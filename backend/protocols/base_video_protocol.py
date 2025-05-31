@@ -1,62 +1,75 @@
 from abc import ABC, abstractmethod
 import socket
 import threading
-import time
+from typing import Optional
+
+from models.video_frame import VideoFrame
+
 
 class BaseVideoProtocolAdapter(ABC):
-    """Base abstract class for drone video protocol adapters"""
-    
-    def __init__(self, drone_ip, control_port, video_port):
+    """
+    Owns transport (UDP or TCP socket, keep-alives) and converts
+    raw payloads into VideoFrame objects via an inner VideoModel.
+    """
+
+    def __init__(self, drone_ip: str, control_port: int, video_port: int):
         self.drone_ip = drone_ip
         self.control_port = control_port
         self.video_port = video_port
-        self.keepalive_thread = None
-        self.running = False
-    
-    @abstractmethod
-    def send_start_command(self):
-        """Send command to start video streaming"""
-        pass
-    
-    @abstractmethod
-    def create_receiver_socket(self):
-        """Create and configure socket for receiving video data"""
-        pass
-    
-    @abstractmethod
-    def parse_packet(self, packet):
-        """Parse a received packet and extract frame data"""
-        pass
-    
-    @abstractmethod
-    def is_valid_packet(self, packet):
-        """Check if a packet is valid for this protocol"""
-        pass
-    
-    def start_keepalive(self, interval=1.0):
-        """Start keepalive thread to maintain video stream"""
-        if self.keepalive_thread and self.keepalive_thread.is_alive():
+        self._keepalive_thread: Optional[threading.Thread] = None
+
+    # ────────── keep-alive helpers ────────── #
+    def start_keepalive(self, interval: float = 1.0) -> None:
+        if self._keepalive_thread and self._keepalive_thread.is_alive():
             return
-            
-        self.running = True
+
         self._stop_evt = threading.Event()
-        self.keepalive_thread = threading.Thread(
+        self._keepalive_thread = threading.Thread(
             target=self._keepalive_loop,
             args=(interval,),
-            daemon=True
+            daemon=True,
         )
-        self.keepalive_thread.start()
-    
-    def stop_keepalive(self):
-        """Stop the keepalive thread"""
+        self._keepalive_thread.start()
+
+    def stop_keepalive(self) -> None:
         if hasattr(self, "_stop_evt"):
-            self._stop_evt.set()        # wake the waiter
-        if self.keepalive_thread:
-            self.keepalive_thread.join()
-    
-    def _keepalive_loop(self, interval):
-        """Periodically send start command to maintain video stream"""
+            self._stop_evt.set()
+        if self._keepalive_thread:
+            self._keepalive_thread.join()
+
+    def _keepalive_loop(self, interval: float) -> None:
         while not self._stop_evt.is_set():
             self.send_start_command()
-            # wait() returns early when _stop_evt is set
             self._stop_evt.wait(interval)
+
+    # ────────── transport helpers ────────── #
+    def recv_from_socket(self, sock) -> Optional[bytes]:
+        """
+        Read one payload chunk from `sock`.
+
+        The default implementation assumes UDP; override for TCP.
+        """
+        try:
+            pkt, _ = sock.recvfrom(4096)
+            return pkt
+        except socket.timeout:
+            return None
+
+    # ────────── abstract API ────────── #
+    @abstractmethod
+    def send_start_command(self) -> None:
+        """Tell the drone to start/continue sending video."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def create_receiver_socket(self) -> socket.socket:
+        """Return a configured socket ready for recv()."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def handle_payload(self, payload: bytes) -> Optional[VideoFrame]:
+        """
+        Convert one transport payload into a VideoFrame or return None
+        if the frame is not yet complete.
+        """
+        raise NotImplementedError
