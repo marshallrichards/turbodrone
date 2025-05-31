@@ -1,15 +1,16 @@
 from dataclasses import dataclass
 
-@dataclass
+@dataclass(frozen=True)
 class ControlProfile:
+    """
+    Profile parameters expressed as *ratios* of the stick range.
+      accel_ratio       – fraction of half-range per second
+      decel_ratio       – fraction of half-range per second
+      expo_factor       – dimension-less (unchanged)
+      immediate_ratio   – fraction of full range for one-shot boost
+    """
     name: str
-    accel_rate: float
-    decel_rate: float
-    expo_factor: float
-    immediate_response: float
-
-PRESETS = {
-    "normal":     ControlProfile("normal",   150, 350, 0.5,  3),
-    "precise":    ControlProfile("precise",  100, 400, 0.3,  1.5),
-    "aggressive": ControlProfile("aggressive", 300, 280, 1.5, 15),
-} 
+    accel_ratio: float
+    decel_ratio: float
+    expo_factor: float = 0.0
+    immediate_ratio: float = 0.0
