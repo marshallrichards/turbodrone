@@ -17,20 +17,27 @@ num_components = 3
 # Target IP and port
 target_ip = "192.168.169.1"
 target_port = 8800
-local_port = 56563
 
 # Create UDP socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+# Allow the port to be reused quickly after the program quits
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+# 0 = "pick any free port"
+local_port = 0            # or read from CLI / env var
+
 try:
     sock.bind(("", local_port))
-    print(f"Socket bound to port {local_port}")
+    # update local_port in case 0 was used
+    local_port = sock.getsockname()[1]
+    print(f"Socket bound to UDP port {local_port}")
 except socket.error as e:
     print(f"Could not bind socket: {e}")
     sock.close()
     import sys
 
-    sys.exit(f"Terminating: Socket binding failed")
+    sys.exit("Terminating: Socket binding failed")
 
 
 def receive_frames(sock, frame_queue):
