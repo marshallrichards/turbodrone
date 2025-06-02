@@ -66,6 +66,9 @@ def receive_frames(sock, frame_queue):
             rqst_B[88], rqst_B[89] = frame_count_bytes
             rqst_B[107], rqst_B[108] = frame_count_bytes
 
+            print("rqst_A: ", rqst_A)
+            print("rqst_B: ", rqst_B)
+
             sock.sendto(rqst_A, (target_ip, target_port))
             sock.sendto(rqst_B, (target_ip, target_port))
             frame_count += 1
@@ -83,6 +86,8 @@ def receive_frames(sock, frame_queue):
                 # In JPEG packets, second byte is 0x01
                 if data[1] != 0x01:
                     continue
+
+                print("when does data happen?");
 
                 # Concatenate JPEG data (without their custom header)
                 fragment_index = int.from_bytes(bytes(data[32:34]), "little")

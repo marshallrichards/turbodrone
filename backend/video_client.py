@@ -43,7 +43,7 @@ def main():
     # )
 
     protocol = WifiUavVideoProtocolAdapter(
-        drone_ip=args.drone_ip,
+        drone_ip="192.168.169.1",
         control_port=8800,
         video_port=8800
     )
