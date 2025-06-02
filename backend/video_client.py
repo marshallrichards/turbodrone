@@ -6,6 +6,7 @@ import sys
 import os
 
 from protocols.s2x_video_protocol import S2xVideoProtocolAdapter
+from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
 from services.video_receiver import VideoReceiverService
 from views.opencv_video_view import OpenCVVideoView
 
@@ -35,10 +36,16 @@ def main():
     args = parser.parse_args()
 
     # Create protocol adapter
-    protocol = S2xVideoProtocolAdapter(
+    # protocol = S2xVideoProtocolAdapter(
+    #     drone_ip=args.drone_ip,
+    #     control_port=args.control_port,
+    #     video_port=args.video_port
+    # )
+
+    protocol = WifiUavVideoProtocolAdapter(
         drone_ip=args.drone_ip,
-        control_port=args.control_port,
-        video_port=args.video_port
+        control_port=8800,
+        video_port=8800
     )
     
     # Create frame queue

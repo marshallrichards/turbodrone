@@ -51,9 +51,9 @@ def receive_frames(sock, frame_queue):
 
     # Start the video feed
     sock.sendto(START_STREAM, (target_ip, target_port))
-    time.sleep(0.1)
-    sock.sendto(START_STREAM, (target_ip, target_port))
-    time.sleep(0.1)
+    # time.sleep(0.1)
+    # sock.sendto(START_STREAM, (target_ip, target_port))
+    # time.sleep(0.1)
 
     while True:
         try:
