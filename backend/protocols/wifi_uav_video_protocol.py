@@ -28,7 +28,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
     REQUEST_B_OFFSETS = (12, 13, 88, 89, 107, 108)
 
     FRAME_TIMEOUT = 0.15          # 150 ms without a full frame → retry
-    MAX_RETRIES = 2              # after this we skip the frame
+    MAX_RETRIES = 1              # after this we skip the frame
     WATCHDOG_SLEEP = 0.05          # 50 ms between watchdog checks
 
     # ------------------------------------------------------------------ #
@@ -78,7 +78,10 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         )
         self._watchdog.start()
 
-        self._retry_cnt = 0
+        self._retry_cnt       = 0          # retries for *current* frame
+        self._had_retry       = False      # did we already retry this frame?
+        self.retry_attempts   = 0          # global counter
+        self.retry_successes  = 0          # global counter
 
     # ------------------------------------------------------------------ #
     # disable keep-alive – one start command is enough for this drone
@@ -140,6 +143,16 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         frame = VideoFrame(frame_id=frame_id, data=jpeg)
 
         self.frames_ok += 1
+
+        # ── was this frame finished thanks to a retry? ───────────
+        if self._had_retry:
+            self.retry_successes += 1
+            self._dbg(f"✓ recovery! {frame_id:04x}  "
+                      f"SUC:{self.retry_successes}  "
+                      f"ATT:{self.retry_attempts}")
+            self._had_retry = False
+        # ──────────────────────────────────────────────────────────────
+
         self._dbg(f"✓ {frame_id:04x} ({len(self._fragments)} frags)  "
                   f"OK:{self.frames_ok}  DROP:{self.frames_dropped}")
 
@@ -201,6 +214,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
                           f"({self._retry_cnt +1}/{self.MAX_RETRIES})")
                 self._send_frame_request((self._current_fid - 1) & 0xFFFF)
                 self._retry_cnt += 1
+                self.retry_attempts += 1
+                self._had_retry = True
             else:
                 # give up – skip this frame just like the PoC script
                 self.frames_dropped += 1
@@ -215,6 +230,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
                 # Ask for the *new* previous frame so the drone sends
                 # the next one (same convention as before).
                 self._send_frame_request((self._current_fid - 1) & 0xFFFF)
+                self._had_retry = False
 
     def stop(self) -> None:
         """Call this from outside when the program shuts down."""
@@ -223,4 +239,9 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
             self._sock.close()
         except Exception:
             pass
+
+        self._dbg(
+            f"[stats] ok:{self.frames_ok}  dropped:{self.frames_dropped}  "
+            f"retry_att:{self.retry_attempts}  retry_suc:{self.retry_successes}"
+        )
 
