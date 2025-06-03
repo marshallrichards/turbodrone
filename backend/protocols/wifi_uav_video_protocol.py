@@ -46,13 +46,13 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self._jpeg_header = generate_jpeg_headers(jpeg_width, jpeg_height, components)
 
         # State for the current frame being assembled
-        self._current_fid: int = 0
+        # If I send 0 it sends 1, starting with 1 is more reliable.
+        self._current_fid: int = 1
         self._fragments: Dict[int, bytes] = {}     # frag_id -> payload
 
         # Kick-off the stream and ask for frame #0
         self.send_start_command()
         self._send_frame_request(self._current_fid)
-        self._current_fid = 1
 
     # ------------------------------------------------------------------ #
     # disable keep-alive – one start command is enough for this drone
@@ -112,12 +112,18 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         jpeg_bytes = self._jpeg_header + b"".join(ordered) + EOI
         frame = VideoFrame(frame_id=frame_id, data=jpeg_bytes)
 
-        # Prepare for next frame
+        # ------------------------------------------------------------------
+        # Prepare for next frame (the drone sends N+1 after we request N)
+        # ------------------------------------------------------------------
         self._fragments.clear()
+
+        # Ask for *this* frame-id; the drone will answer with frame-id + 1
+        print(f"sending frame request for frame: {frame_id}")
+        time.sleep(0.01)
+        self._send_frame_request(frame_id)
+
+        # Expect the next frame in the upcoming packets
         self._current_fid = (frame_id + 1) & 0xFFFF
-        print("sending frame request for frame: ", self._current_fid)
-        time.sleep(0.02)
-        self._send_frame_request(self._current_fid)
 
         return frame
 
