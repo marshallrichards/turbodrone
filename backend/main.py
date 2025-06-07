@@ -74,8 +74,7 @@ def main():
 
     controller = FlightController(drone_model, protocol_adapter, args.rate)
     
-    # Start controller
-    controller.start()
+
     
     # Start video if requested
     video_view = None
@@ -116,6 +115,9 @@ def main():
             name="OpenCVVideoThread"
         )
         video_thread.start()
+
+    # Start controller
+    controller.start()
     
     # Set up signal handler for clean shutdown
     def signal_handler(sig, frame):
