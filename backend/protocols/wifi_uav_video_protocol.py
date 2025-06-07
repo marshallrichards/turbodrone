@@ -43,7 +43,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         jpeg_height: int = 360,
         components: int = 3,
         *,
-        debug: bool = True,
+        debug: bool = False,
     ):
         super().__init__(drone_ip, control_port, video_port)
 

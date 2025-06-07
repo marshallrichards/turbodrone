@@ -37,10 +37,6 @@ class S2xRCProtocolAdapter(BaseProtocolAdapter):
         # Byte 7 - base value 0x0a
         pkt[7] = 0x0a
         
-        # Record flag
-        if drone_model.record_state:
-            pkt[7] |= (drone_model.record_state << 2)
-
         # bytes 8-17 are zero-filled
 
         # Calculate checksum (bytes 2-17)
@@ -80,7 +76,6 @@ class S2xRCProtocolAdapter(BaseProtocolAdapter):
             if flags6 & 0x02: flags_desc.append("LAND")
             if flags6 & 0x04: flags_desc.append("STOP")
             if flags7 & 0x01: flags_desc.append("HEADLESS")
-            if flags7 & 0x04: flags_desc.append("RECORD")
             
             print(f"  Flags: {flags_desc}")
             print(f"  Checksum: 0x{packet[18]:02x}")

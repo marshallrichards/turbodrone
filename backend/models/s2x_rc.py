@@ -31,7 +31,6 @@ class S2xDroneModel(BaseRCModel):
 
         # misc
         self.speed = 20    # matches 0x14 from dumps
-        self.record_state = 0  # bit 2 in byte 7
 
         # Track last direction for each axis
         self.last_throttle_dir = 0
@@ -108,11 +107,6 @@ class S2xDroneModel(BaseRCModel):
         """Set land flag"""
         self.land_flag = True
     
-    def toggle_record(self):
-        """Toggle recording state"""
-        self.record_state = 1 if self.record_state == 0 else 0
-        return self.record_state
-        
     def get_control_state(self):
         """Get current control state as a dict"""
         return {
@@ -120,7 +114,6 @@ class S2xDroneModel(BaseRCModel):
             "yaw":       self.yaw,
             "pitch":     self.pitch,
             "roll":      self.roll,
-            "recording": self.record_state > 0,
         }
 
     def set_strategy(self, strategy) -> None:
