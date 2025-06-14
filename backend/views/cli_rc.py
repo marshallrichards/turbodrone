@@ -23,7 +23,7 @@ class CLIView:
         stdscr.nodelay(True)
         stdscr.keypad(True)
         help_msg = "W/S=throttle  A/D=yaw  Arrows=pitch/roll  T=takeoff  L=land  Q=quit"
-        help_msg2 = "R=record  F=debug packets  X=sensitivity mode"
+        help_msg2 = "F=debug packets  X=sensitivity mode"
 
         # direction states and last-press timestamps
         throttle_dir = yaw_dir = pitch_dir = roll_dir = 0
@@ -46,8 +46,6 @@ class CLIView:
                 self.controller.model.takeoff()
             elif c in (ord('l'), ord('L')):
                 self.controller.model.land()
-            elif c in (ord('r'), ord('R')):
-                self.controller.model.toggle_record()
             elif c in (ord('f'), ord('F')):
                 debug_enabled = self.controller.protocol.toggle_debug()
             elif c in (ord('x'), ord('X')):
@@ -103,7 +101,6 @@ class CLIView:
                 
             # Add status flags to UI
             status_flags = [f"Mode: {self.sensitivity_labels[self.sensitivity_mode]}"]
-            if state['recording']: status_flags.append("RECORD")
             if debug_enabled: status_flags.append("DEBUG")
             status_str = " | ".join(status_flags)
             stdscr.addstr(2, 0, f"Status: {status_str}")

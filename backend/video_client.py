@@ -6,6 +6,7 @@ import sys
 import os
 
 from protocols.s2x_video_protocol import S2xVideoProtocolAdapter
+from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
 from services.video_receiver import VideoReceiverService
 from views.opencv_video_view import OpenCVVideoView
 
@@ -34,19 +35,31 @@ def main():
     )
     args = parser.parse_args()
 
-    # Create protocol adapter
-    protocol = S2xVideoProtocolAdapter(
-        drone_ip=args.drone_ip,
-        control_port=args.control_port,
-        video_port=args.video_port
-    )
+    # Define the blueprint for our protocol adapter.
+    # The VideoReceiverService will use this to create new instances.
+    protocol_class = WifiUavVideoProtocolAdapter
+    protocol_args = {
+        "drone_ip": "192.168.169.1",
+        "control_port": 8800,
+        "video_port": 8800,
+        "debug": True
+    }
+
+    # protocol_class = S2xVideoProtocolAdapter
+    # protocol_args = {
+    #     "drone_ip": "172.16.10.1",
+    #     "control_port": 8080,
+    #     "video_port": 8888,
+    #     "debug": True
+    # }
     
     # Create frame queue
     frame_queue = queue.Queue(maxsize=100)
     
-    # Create and start video receiver service
+    # The service now takes the class and args to manage the protocol's lifecycle.
     receiver = VideoReceiverService(
-        protocol,
+        protocol_class,
+        protocol_args,
         frame_queue,
         dump_frames=args.dump_frames,
         dump_packets=args.dump_packets,
@@ -72,10 +85,8 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # Send initial start command
-    protocol.send_start_command()
-    
-    # Start the receiver service
+    # The receiver service now manages the entire protocol lifecycle.
+    # We no longer send the initial start command from here.
     receiver.start()
     
     try:

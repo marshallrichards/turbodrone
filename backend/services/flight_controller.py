@@ -4,7 +4,7 @@ import time
 class FlightController:
     """Core service that manages drone flight operations"""
     
-    def __init__(self, drone_model, protocol_adapter, update_rate=20.0):
+    def __init__(self, drone_model, protocol_adapter, update_rate=80.0):
         self.model = drone_model
         self.protocol = protocol_adapter
         self.update_interval = 1.0 / update_rate

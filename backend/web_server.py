@@ -12,11 +12,15 @@ import os
 import queue
 from typing import Optional
 import threading
+from contextlib import asynccontextmanager
 
 import cv2
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ───────────────────────────────────────────────────────────────
 # Domain-specific imports
@@ -24,14 +28,111 @@ from starlette.middleware.cors import CORSMiddleware
 from models.s2x_rc import S2xDroneModel
 from protocols.s2x_rc_protocol_adapter import S2xRCProtocolAdapter
 from protocols.s2x_video_protocol import S2xVideoProtocolAdapter
+from models.wifi_uav_rc import WifiUavRcModel
+from protocols.wifi_uav_rc_protocol_adapter import WifiUavRcProtocolAdapter
+from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
 from services.flight_controller import FlightController
 from services.video_receiver import VideoReceiverService
 from control.strategies import DirectStrategy, IncrementalStrategy
 
 # ───────────────────────────────────────────────────────────────
+# Globals to track the pump
+# ───────────────────────────────────────────────────────────────
+_pump_stop: threading.Event | None = None
+_pump_thread: threading.Thread | None = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    global flight_controller, receiver, video_keepalive, _pump_stop, _pump_thread
+    drone_type = os.getenv("DRONE_TYPE", "s2x")
+
+    if drone_type == "s2x":
+        print("[main] Using S2X drone implementation.")
+        default_ip = "172.16.10.1"
+        default_ctrl_port = 8080
+        default_video_port = 8888
+        
+        drone_ip = os.getenv("DRONE_IP", default_ip)
+        ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
+        video_port = int(os.getenv("VIDEO_PORT", default_video_port))
+
+        model = S2xDroneModel()
+        rc_proto = S2xRCProtocolAdapter(drone_ip, ctrl_port)
+        video_adapter_cls  = S2xVideoProtocolAdapter
+        video_adapter_args = {
+            "drone_ip":   drone_ip,
+            "control_port": ctrl_port,
+            "video_port": video_port,
+            "debug":      False,
+        }
+
+    elif drone_type == "wifi_uav":
+        print("[main] Using WiFi UAV drone implementation.")
+        default_ip = "192.168.169.1"
+        default_ctrl_port = 8800
+        default_video_port = 8800
+
+        drone_ip = os.getenv("DRONE_IP", default_ip)
+        ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
+        video_port = int(os.getenv("VIDEO_PORT", default_video_port))
+
+        model = WifiUavRcModel()
+        rc_proto = WifiUavRcProtocolAdapter(drone_ip, ctrl_port)
+        video_adapter_cls  = WifiUavVideoProtocolAdapter
+        video_adapter_args = {
+            "drone_ip":   drone_ip,
+            "control_port": ctrl_port,
+            "video_port": video_port,
+            "debug":      True,   # keep verbose output
+        }
+    else:
+        raise ValueError(f"Unknown drone type: {drone_type}")
+
+    # 1. Video – let the service create / recycle the adapter
+    receiver = VideoReceiverService(
+        video_adapter_cls,
+        video_adapter_args,
+        RAW_Q,
+    )
+    receiver.start()
+
+    # Wait a moment for video to stabilize
+    await asyncio.sleep(1)
+
+    # 2. RC / flight
+    flight_controller = FlightController(model, rc_proto)
+    flight_controller.start()
+
+    # 3. start bridge thread (daemon)
+    _pump_stop = threading.Event()
+    main_loop = asyncio.get_running_loop()
+    _pump_thread = threading.Thread(
+        target=_frame_pump_worker,
+        args=(RAW_Q, _pump_stop, main_loop),
+        name="FramePump",
+        daemon=True,
+    )
+    _pump_thread.start()
+
+    # 4. nothing to do – VideoReceiverService runs the keep-alive
+    
+    yield
+
+    # Shutdown
+    if flight_controller:
+        flight_controller.stop()
+    if receiver:
+        receiver.stop()
+    if _pump_stop:
+        _pump_stop.set()
+    if _pump_thread:
+        _pump_thread.join(timeout=1.0)
+
+# ───────────────────────────────────────────────────────────────
 # FastAPI app + permissive CORS (tighten in production!)
 # ───────────────────────────────────────────────────────────────
-app = FastAPI(title="Drone web adapter")
+app = FastAPI(title="Drone web adapter", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -50,70 +151,6 @@ flight_controller: Optional[FlightController] = None
 receiver: Optional[VideoReceiverService] = None
 
 video_keepalive: "VideoKeepAlive | None" = None
-
-# ───────────────────────────────────────────────────────────────
-# Globals to track the pump
-# ───────────────────────────────────────────────────────────────
-_pump_stop: threading.Event | None = None
-_pump_thread: threading.Thread | None = None
-
-
-# ───────────────────────────────────────────────────────────────
-# Boot drone services at web-server startup
-# ───────────────────────────────────────────────────────────────
-@app.on_event("startup")
-async def startup_event() -> None:
-    global flight_controller, receiver, video_keepalive
-
-    drone_ip = os.getenv("DRONE_IP", "172.16.10.1")
-    ctrl_port = int(os.getenv("CONTROL_PORT", 8080))
-    video_port = int(os.getenv("VIDEO_PORT", 8888))
-
-    # 1. RC / flight
-    model = S2xDroneModel()
-    rc_proto = S2xRCProtocolAdapter(drone_ip, ctrl_port)
-    flight_controller = FlightController(model, rc_proto)
-    flight_controller.start()
-
-    # 2. video
-    video_proto = S2xVideoProtocolAdapter(drone_ip, ctrl_port, video_port)
-    receiver = VideoReceiverService(video_proto, RAW_Q)
-    video_proto.send_start_command()
-    receiver.start()
-
-    # 3. start bridge thread (daemon)
-    global _pump_stop, _pump_thread
-    _pump_stop = threading.Event()
-
-    main_loop = asyncio.get_running_loop()        # <- capture here!
-
-    _pump_thread = threading.Thread(
-        target=_frame_pump_worker,
-        args=(RAW_Q, _pump_stop, main_loop),      # <- pass it in
-        name="FramePump",
-        daemon=True,
-    )
-    _pump_thread.start()
-
-    # 4. keep-alive pinger (reuse same proto)
-    video_keepalive = VideoKeepAlive(send_start_cmd=video_proto.send_start_command)
-    video_keepalive.start()
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    if flight_controller:
-        flight_controller.stop()
-    if receiver:
-        receiver.stop()
-    if video_keepalive:
-        video_keepalive.stop()
-    # stop frame-pump
-    if _pump_stop:
-        _pump_stop.set()
-    if _pump_thread:
-        _pump_thread.join(timeout=1.0)
-
 
 # ───────────────────────────────────────────────────────────────
 # Frame-pump implementation
