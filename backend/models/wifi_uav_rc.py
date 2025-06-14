@@ -8,7 +8,9 @@ from control.strategies import IncrementalStrategy
 
 class WifiUavRcModel(BaseRCModel):
     """
-    RC model for inexpensive "WiFi UAV" quadcopters (E58, LH-X20, …).
+    RC model for toy drones that use the "WiFi UAV" mobile app (E58, LH-X20, …).
+
+    RC rate needs to be 50 - 80 Hz to work well.
 
     Observations from packet captures:
 
@@ -19,7 +21,8 @@ class WifiUavRcModel(BaseRCModel):
     """
 
     #            min, mid, max
-    STICK_RANGE = StickRange(63, 128, 191)
+    # STICK_RANGE = StickRange(0, 128, 255)
+    STICK_RANGE = StickRange(40, 128, 220)
 
     PRESETS = {
         # name         accel   decel  expo  immediate-boost

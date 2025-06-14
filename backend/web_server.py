@@ -84,12 +84,12 @@ async def lifespan(app: FastAPI):
             "drone_ip":   drone_ip,
             "control_port": ctrl_port,
             "video_port": video_port,
-            "debug":      True,      # keep verbose output for debugging
+            "debug":      True,   # keep verbose output
         }
     else:
         raise ValueError(f"Unknown drone type: {drone_type}")
 
-    # 1. Video  – service now builds / restarts the adapter itself
+    # 1. Video – let the service create / recycle the adapter
     receiver = VideoReceiverService(
         video_adapter_cls,
         video_adapter_args,
@@ -112,7 +112,7 @@ async def lifespan(app: FastAPI):
     )
     _pump_thread.start()
 
-    # 4. nothing to do – VideoReceiverService starts keep-alive on each adapter
+    # 4. nothing to do – VideoReceiverService runs the keep-alive
     
     yield
 

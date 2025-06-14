@@ -30,7 +30,7 @@ def main():
                         help="Drone control port (default: s2x=8080, wifi_uav=8800)")
     parser.add_argument("--video-port", type=int,
                         help="Drone video port (default: s2x=8888, wifi_uav=8800)")
-    parser.add_argument("--rate", type=float, default=20.0, 
+    parser.add_argument("--rate", type=float, default=80.0, 
                         help="Control packets per second")
     parser.add_argument("--with-video", action="store_true",
                         help="Enable video feed")

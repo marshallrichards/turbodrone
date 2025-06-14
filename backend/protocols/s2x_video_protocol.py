@@ -28,6 +28,8 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self.local_ip = self._discover_local_ip()
         self._sock_lock = threading.Lock()
         self._sock = self.create_receiver_socket()
+        self._keepalive_thread: Optional[threading.Thread] = None
+        self._keepalive_stop: Optional[threading.Event] = None
         if debug:
             print(f"[s2x] Video socket on *:{self._sock.getsockname()[1]}")
 
@@ -37,6 +39,26 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.sendto(payload, (self.drone_ip, self.control_port))
         print(f"[video] Start command sent ({payload.hex(' ')})")
+
+    def start_keepalive(self, interval: float = 2.0) -> None:
+        """Starts a thread to periodically send the start command."""
+        if self._keepalive_thread is None:
+            self._keepalive_stop = threading.Event()
+            self._keepalive_thread = threading.Thread(
+                target=self._keepalive_loop,
+                args=(interval, self._keepalive_stop),
+                daemon=True,
+                name="S2xVideoKeepAlive",
+            )
+            self._keepalive_thread.start()
+
+    def stop_keepalive(self) -> None:
+        """Stops the keepalive thread."""
+        if self._keepalive_stop:
+            self._keepalive_stop.set()
+        if self._keepalive_thread:
+            self._keepalive_thread.join(timeout=1.0)
+            self._keepalive_thread = None
 
     def create_receiver_socket(self) -> socket.socket:
         """UDP socket bound to the drone's video port."""
@@ -50,6 +72,13 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
         """Returns the main data socket, required by the new VideoReceiverService."""
         with self._sock_lock:
             return self._sock
+
+    def recv_from_socket(self, sock: socket.socket) -> Optional[bytes]:
+        """Receives from the socket and handles timeouts."""
+        try:
+            return sock.recv(4096)  # Use a reasonable buffer size
+        except socket.timeout:
+            return None
 
     def handle_payload(self, payload: bytes) -> Optional[VideoFrame]:
         """
@@ -77,12 +106,18 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
     def stop(self) -> None:
         """Shuts down the adapter, required by the new VideoReceiverService."""
         print("[s2x] Stopping protocol adapter.")
+        self.stop_keepalive()
         try:
             self._sock.close()
         except Exception:
             pass
 
     # ────────── helpers ────────── #
+    def _keepalive_loop(self, interval: float, stop_event: threading.Event) -> None:
+        while not stop_event.is_set():
+            self.send_start_command()
+            stop_event.wait(interval)
+
     def _discover_local_ip(self) -> str:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
