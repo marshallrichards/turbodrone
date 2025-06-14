@@ -59,7 +59,13 @@ async def lifespan(app: FastAPI):
 
         model = S2xDroneModel()
         rc_proto = S2xRCProtocolAdapter(drone_ip, ctrl_port)
-        video_proto = S2xVideoProtocolAdapter(drone_ip, ctrl_port, video_port)
+        video_adapter_cls  = S2xVideoProtocolAdapter
+        video_adapter_args = {
+            "drone_ip":   drone_ip,
+            "control_port": ctrl_port,
+            "video_port": video_port,
+            "debug":      False,
+        }
 
     elif drone_type == "wifi_uav":
         print("[main] Using WiFi UAV drone implementation.")
@@ -73,17 +79,22 @@ async def lifespan(app: FastAPI):
 
         model = WifiUavRcModel()
         rc_proto = WifiUavRcProtocolAdapter(drone_ip, ctrl_port)
-        video_proto = WifiUavVideoProtocolAdapter(
-            drone_ip=drone_ip,
-            control_port=ctrl_port,
-            video_port=video_port
-        )
+        video_adapter_cls  = WifiUavVideoProtocolAdapter
+        video_adapter_args = {
+            "drone_ip":   drone_ip,
+            "control_port": ctrl_port,
+            "video_port": video_port,
+            "debug":      True,      # keep verbose output for debugging
+        }
     else:
         raise ValueError(f"Unknown drone type: {drone_type}")
 
-    # 1. Video
-    receiver = VideoReceiverService(video_proto, RAW_Q)
-    video_proto.send_start_command()
+    # 1. Video  – service now builds / restarts the adapter itself
+    receiver = VideoReceiverService(
+        video_adapter_cls,
+        video_adapter_args,
+        RAW_Q,
+    )
     receiver.start()
 
     # 2. RC / flight
@@ -101,9 +112,7 @@ async def lifespan(app: FastAPI):
     )
     _pump_thread.start()
 
-    # 4. keep-alive pinger (reuse same proto)
-    video_keepalive = VideoKeepAlive(send_start_cmd=video_proto.send_start_command)
-    video_keepalive.start()
+    # 4. nothing to do – VideoReceiverService starts keep-alive on each adapter
     
     yield
 
@@ -112,8 +121,6 @@ async def lifespan(app: FastAPI):
         flight_controller.stop()
     if receiver:
         receiver.stop()
-    if video_keepalive:
-        video_keepalive.stop()
     if _pump_stop:
         _pump_stop.set()
     if _pump_thread:
