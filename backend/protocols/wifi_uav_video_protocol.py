@@ -49,6 +49,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
 
         self.debug = debug
         self._dbg = (lambda *a, **k: print(*a, **k)) if debug else (lambda *a, **k: None)
+        self._sock_lock = threading.Lock()
 
         self._sock = self._create_duplex_socket()
 
@@ -67,14 +68,14 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self.frames_dropped = 0
         self._dbg(f"[init] adapter ready (control:{control_port}  video:{video_port})")
 
-        # Kick-off the stream and ask for frame #0
+        # Kick-off the stream and ask for the first frame
         self.send_start_command()
-        self._send_frame_request(self._current_fid)
+        self._send_frame_request(0) # Request frame 0 to get frame 1
 
-        # Watchdog
+        # Watchdog for per-frame timeouts
         self._running = True
         self._watchdog = threading.Thread(
-            target=self._watchdog_loop, daemon=True
+            target=self._watchdog_loop, daemon=True, name="FrameWatchdog"
         )
         self._watchdog.start()
 
@@ -82,6 +83,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self._had_retry       = False      # did we already retry this frame?
         self.retry_attempts   = 0          # global counter
         self.retry_successes  = 0          # global counter
+
+        self._dbg(f"Main UDP socket created, listening on *:{self._sock.getsockname()[1]}")
 
     # ------------------------------------------------------------------ #
     # disable keep-alive – one start command is enough for this drone
@@ -188,20 +191,28 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("", 0))          # let OS choose a free local port
         sock.settimeout(1.0)
+        self._dbg(f"Main UDP socket created, listening on *:{sock.getsockname()[1]}")
         return sock
+
+    def get_receiver_socket(self) -> socket.socket:
+        """Returns the main socket for the receiver thread to use."""
+        with self._sock_lock:
+            return self._sock
 
     # ------------------------------------------------------------------ #
     # watchdog
     # ------------------------------------------------------------------ #
     def _watchdog_loop(self) -> None:
         """
-        Runs in a daemon thread.  If the current frame doesn't finish within
-        FRAME_TIMEOUT seconds we resend the request for that frame.
+        Runs in a daemon thread. If the current frame doesn't finish within
+        FRAME_TIMEOUT seconds, resend the request for that frame.
+        Link-level reconnection is handled by the VideoReceiverService.
         """
+        self._dbg("Watchdog started for per-frame timeouts.")
         while self._running:
             time.sleep(self.WATCHDOG_SLEEP)
-
             now = time.time()
+
             if now - self._last_req_ts < self.FRAME_TIMEOUT:
                 continue                    # still waiting → nothing to do
 
@@ -209,7 +220,6 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
             # retry or drop?
             # ----------------------------------------------------------
             if self._retry_cnt < self.MAX_RETRIES:
-                # try again for the SAME frame
                 self._dbg(f"⚠ timeout FID {self._current_fid:04x} – retry "
                           f"({self._retry_cnt +1}/{self.MAX_RETRIES})")
                 self._send_frame_request((self._current_fid - 1) & 0xFFFF)
@@ -217,7 +227,6 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
                 self.retry_attempts += 1
                 self._had_retry = True
             else:
-                # give up – skip this frame just like the PoC script
                 self.frames_dropped += 1
                 self._dbg(f"✗ drop   FID {self._current_fid:04x} "
                           f"(after {self._retry_cnt} retries)  "
@@ -226,19 +235,19 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
                 self._fragments.clear()
                 self._retry_cnt  = 0
                 self._current_fid = (self._current_fid + 1) & 0xFFFF
-
-                # Ask for the *new* previous frame so the drone sends
-                # the next one (same convention as before).
                 self._send_frame_request((self._current_fid - 1) & 0xFFFF)
                 self._had_retry = False
 
     def stop(self) -> None:
-        """Call this from outside when the program shuts down."""
+        """Gracefully shut down the adapter and its threads."""
+        self._dbg(f"Stopping protocol adapter instance...")
         self._running = False
         try:
+            if self._watchdog and self._watchdog.is_alive():
+                self._watchdog.join(timeout=0.5)
             self._sock.close()
-        except Exception:
-            pass
+        except Exception as e:
+            self._dbg(f"Ignoring error during shutdown: {e}")
 
         self._dbg(
             f"[stats] ok:{self.frames_ok}  dropped:{self.frames_dropped}  "

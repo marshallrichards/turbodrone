@@ -82,31 +82,32 @@ def main():
     video_thread = None
     
     if args.with_video:
-        # Create video components
+        # Define the blueprint for the video protocol adapter.
+        # The VideoReceiverService will create and manage the instance.
         if args.drone_type == "s2x":
-            video_protocol = video_protocol_adapter_class(
-                drone_ip, 
-                control_port,
-                video_port
-            )
+            video_protocol_args = {
+                "drone_ip": drone_ip,
+                "control_port": control_port,
+                "video_port": video_port
+            }
         elif args.drone_type == "wifi_uav":
-            video_protocol = video_protocol_adapter_class(
-                drone_ip=drone_ip,
-                control_port=control_port, # WifiUavVideoProtocolAdapter uses this
-                video_port=video_port     # And this as well for its duplex socket
-            )
+            video_protocol_args = {
+                "drone_ip": drone_ip,
+                "control_port": control_port,
+                "video_port": video_port
+            }
         
         frame_queue = queue.Queue(maxsize=100)
         video_receiver = VideoReceiverService(
-            video_protocol,
+            video_protocol_adapter_class, # The class to instantiate
+            video_protocol_args,          # The arguments for it
             frame_queue,
             dump_frames=args.dump_frames,
             dump_packets=args.dump_packets
         )
         video_view = OpenCVVideoView(frame_queue)
         
-        # Start video
-        video_protocol.send_start_command()
+        # Start video receiver service. It now handles the protocol's lifecycle.
         video_receiver.start()
         
         # Run HighGUI in its own, non-daemon thread
