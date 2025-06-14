@@ -97,6 +97,9 @@ async def lifespan(app: FastAPI):
     )
     receiver.start()
 
+    # Wait a moment for video to stabilize
+    await asyncio.sleep(1)
+
     # 2. RC / flight
     flight_controller = FlightController(model, rc_proto)
     flight_controller.start()
