@@ -27,6 +27,9 @@ class FlightController:
         self.running = False
         if hasattr(self, 'control_thread'):
             self.control_thread.join(timeout=1.0)
+        
+        if hasattr(self.protocol, 'stop'):
+            self.protocol.stop()
             
     def set_control_direction(self, control, direction):
         """Set control direction (-1, 0, 1)"""
@@ -67,8 +70,14 @@ class FlightController:
             })
             
             # Build and send packet
-            packet = self.protocol.build_control_packet(self.model)
-            self.protocol.send_control_packet(packet)
+            try:
+                packet = self.protocol.build_control_packet(self.model)
+                self.protocol.send_control_packet(packet)
+            except Exception:
+                # The RC socket may be momentarily unavailable while the
+                # video layer is recreating its socket. Ignore and keep
+                # looping – a fresh socket will be injected shortly.
+                pass
             
             # Sleep to maintain update rate
             time.sleep(self.update_interval)
