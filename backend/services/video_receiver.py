@@ -22,12 +22,14 @@ class VideoReceiverService:
         dump_frames=False,
         dump_packets=False,
         dump_dir=None,
+        rc_adapter=None,
     ):
         self.protocol_adapter_class = protocol_adapter_class
         self.protocol_adapter_args = protocol_adapter_args
         self.frame_queue = frame_queue or queue.Queue(maxsize=max_queue_size)
         self.dump_frames = dump_frames
         self.dump_packets = dump_packets
+        self.rc_adapter = rc_adapter
 
         self.protocol = None # Will be managed in the receiver loop
 
@@ -88,6 +90,12 @@ class VideoReceiverService:
                     self.protocol = self.protocol_adapter_class(**self.protocol_adapter_args)
                     link_dead_timeout = getattr(self.protocol, "LINK_DEAD_TIMEOUT", 3.0)
                     last_packet_time = time.time()
+
+                    # For WiFi-UAV, share the video socket with the RC adapter
+                    if self.rc_adapter and hasattr(self.rc_adapter, "set_socket"):
+                        print("[receiver] Sharing new video socket with RC adapter.")
+                        sock = self.protocol.get_receiver_socket()
+                        self.rc_adapter.set_socket(sock)
 
                     if hasattr(self.protocol, "send_start_command"):
                         self.protocol.send_start_command()

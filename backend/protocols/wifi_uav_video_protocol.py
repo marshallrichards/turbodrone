@@ -27,8 +27,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
     REQUEST_A_OFFSETS = (12, 13)          # two-byte LE frame counter
     REQUEST_B_OFFSETS = (12, 13, 88, 89, 107, 108)
 
-    FRAME_TIMEOUT = 0.15          # 150 ms without a full frame → retry
-    MAX_RETRIES = 1              # after this we skip the frame
+    FRAME_TIMEOUT = 0.10          # 150 ms without a full frame → retry
+    MAX_RETRIES = 2              # after this we skip the frame
     WATCHDOG_SLEEP = 0.05          # 50 ms between watchdog checks
 
     # ------------------------------------------------------------------ #

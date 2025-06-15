@@ -90,11 +90,15 @@ async def lifespan(app: FastAPI):
         raise ValueError(f"Unknown drone type: {drone_type}")
 
     # 1. Video – let the service create / recycle the adapter
-    receiver = VideoReceiverService(
-        video_adapter_cls,
-        video_adapter_args,
-        RAW_Q,
-    )
+    video_service_args = {
+        "protocol_adapter_class": video_adapter_cls,
+        "protocol_adapter_args": video_adapter_args,
+        "frame_queue": RAW_Q,
+    }
+    if drone_type == "wifi_uav":
+        video_service_args["rc_adapter"] = rc_proto
+    
+    receiver = VideoReceiverService(**video_service_args)
     receiver.start()
 
     # Wait a moment for video to stabilize

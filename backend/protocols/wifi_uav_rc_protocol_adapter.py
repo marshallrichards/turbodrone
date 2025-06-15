@@ -1,5 +1,5 @@
 import socket
-from typing import Final, List
+from typing import Final, List, Optional
 
 from protocols.base_protocol_adapter import BaseProtocolAdapter
 from models.wifi_uav_rc import WifiUavRcModel
@@ -40,11 +40,13 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
     # ------------------------------------------------------------------ #
     def __init__(self,
                  drone_ip: str = DEFAULT_DRONE_IP,
-                 control_port: int = DEFAULT_PORT) -> None:
+                 control_port: int = DEFAULT_PORT,
+                 shared_sock: Optional[socket.socket] = None) -> None:
         self.drone_ip = drone_ip
         self.control_port = control_port
 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock = shared_sock or socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._is_shared_sock = shared_sock is not None
         self.debug_packets = False
         self._pkt_counter = 0
 
@@ -52,6 +54,23 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         self._ctr1 = 0x0000
         self._ctr2 = 0x0001
         self._ctr3 = 0x0002
+
+    def set_socket(self, sock: socket.socket) -> None:
+        """Use an externally managed socket instead of the internal one."""
+        # Don't close the old socket if it was created here
+        if self.sock and not self._is_shared_sock:
+            self.sock.close()
+        
+        self.sock = sock
+        self._is_shared_sock = True
+
+    def stop(self) -> None:
+        """Close the socket if it's not shared."""
+        if self.sock and not self._is_shared_sock:
+            try:
+                self.sock.close()
+            except Exception:
+                pass # Ignore errors on shutdown
 
     # ------------------------------------------------------------------ #
     # BaseProtocolAdapter
@@ -115,7 +134,19 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         return bytes(pkt)
 
     def send_control_packet(self, packet: bytes):  # type: ignore[override]
-        self.sock.sendto(packet, (self.drone_ip, self.control_port))
+        """
+        Transmit one RC packet.
+        If the video layer has just torn the shared socket down, the send
+        will raise OSError(EBADF).  Swallow it and wait until the receiver
+        hands us the fresh socket.
+        """
+        try:
+            self.sock.sendto(packet, (self.drone_ip, self.control_port))
+        except OSError:
+            # Socket was closed during video-reconnect window.
+            # Wait for VideoReceiverService to call set_socket(…) with the
+            # new descriptor.  Until then we just skip transmitting.
+            return
 
         if self.debug_packets:
             self._pkt_counter += 1
