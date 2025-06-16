@@ -13,6 +13,7 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
     |------------|-----------------|---------------|-------------------------------------------------------------|-------|
     | Loiley     | S29             | Tested    | [Amazon](https://www.amazon.com/Beginners-Altitude-Gestures-Adjustable-Batteries/dp/B0CFDVKJKC)                  | Best build quality, has servo for tilting camera(_not implemented in API yet_)|
     | Hiturbo    | S20             | Tested    | [Amazon](https://www.amazon.com/dp/B0BBVZ849G), [Alternate Amazon Listing](https://www.amazon.com/Beginners-Foldable-Quadcopter-Gestures-Batteries/dp/B0D8LK1KJ3)                  | Original test platform, great build quality|
+    | FlyVista | V88 | Tested | [Amazon](https://www.amazon.com/dp/B0D5CXY6X8) | |
     | ? | D16/GT3/V66 | Tested | cheapest on [Aliexpress](https://www.aliexpress.us/item/3256808590663347.html), [Amazon](https://www.amazon.com/THOAML-Batteries-Altitude-Headless-360%C2%B0Flip/dp/B0F1D6F62J/) | 20% smaller DJI Neo clone. Only good for indoor flight really. 
     | Several Brands | E58 | Tested* | [Amazon](https://www.amazon.com/Foldable-Quadcopter-Beginners-Batteries-Waypoints/dp/B09KV8L7WN/) | Atleast video feed has been tested physically with this drone. Very likely will work though. |
     | Karuisrc | K417 | Tested* | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | |
@@ -65,7 +66,10 @@ Make sure WiFi Dongle is plugged in, drone is turned on, connect to the "BRAND-M
 
 Create a `.env` file in the `backend` directory. Add a DRONE_TYPE based on which drone you have:
 ```
+# For "com.vison.macrochip" (s2x) based drones like S20 and S29:
 DRONE_TYPE=s2x
+# For WiFi UAV-based drones like V88 and D16:
+# DRONE_TYPE=wifi_uav 
 ```
 
 Launch the backend: 
@@ -90,20 +94,20 @@ Reconnection logic was solved recently.
 
 Video feed: solid.
 
-Controls: improved greatly via the web client. 
+Controls: improved greatly via the web client. The implementation for WiFi UAV-based drones could use some fine-tuning.
 
-Web Client: first version is out now.
+Web Client: support for various inputs like keyboard, gamepad controllers, and ThinkPad TrackPoint mouse(lol).
 
-Also working on adding support for more drones from [Amazon's best-selling drone list](https://www.amazon.com/best-selling-drones/s?k=best+selling+drones).
+Working on adding support for more drones from [Amazon's best-selling drone list](https://www.amazon.com/best-selling-drones/s?k=best+selling+drones).
 
 
 ## Contribute
-To contribute a new "toy" drone, download the APK the drone uses on a mirror site and start reverse engineering it by decompiling to java files with [jadx](https://github.com/skylot/jadx).
-From there, look for entry points into the app like `MainActivity` or `BaseApplication` and look for port usage or protocol usage explicitly mentioned like TCP or UDP.
-Additionally, Wireshark is your friend for understanding the raw data packets being sent and received by the app. Watch this [video](https://x.com/marshallrichrds/status/1923165437698670818) for an overview into the reverse engineering process used for adding support for the first drone.
+To contribute support for a new "toy" drone, download the APK the drone uses on a mirror site and start reverse engineering it by decompiling to java files with [jadx](https://github.com/skylot/jadx).
+From there, look at the `AndroidManifest.xml` and see if you can find the classes that are entry points for the app. Look for port usage or protocol usage explicitly mentioned like TCP or UDP. Most of these apps will do the actual communication and video feed processing in native C++ libraries that will be embedded inside the APK. You can use a tool like Ghidra to decompile the native libraries and see if you can discover anything useful. For video feed processing you want to figure out what format is uses e.g. JPEG, YUV, etc. and also if it uses compression and what the byte structure looks like when its reforming an image frame from packets.
+Additionally, Wireshark is your friend for understanding the raw data packets being sent and received by the app. Watch this [video](https://x.com/marshallrichrds/status/1923165437698670818) for an overview into the reverse engineering process used for adding support for the Hiturbo S20 drone.
 
-Once you have the protocols for RC and video figured out, make a small test program and add it to `experimental` directory at that point if you'd like.
-After that, you can work on an implementation that is compatible with the existing back-end architecture; examples of this are the s2x and wifi_uav reverse-engineered implementations.
+Once you have the protocols and processing for RC and video figured out, make a small test program and add it to the `experimental` directory at that point if you'd like.
+After that, you can work on an implementation that is compatible with the existing back-end architecture; examples of this are the `s2x` and `wifi_uav` reverse-engineered implementations.
 
 
 ## Experimental Support
