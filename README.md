@@ -16,12 +16,13 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
     | FlyVista | V88 | Tested | [Amazon](https://www.amazon.com/dp/B0D5CXY6X8) | |
     | ? | D16/GT3/V66 | Tested | cheapest on [Aliexpress](https://www.aliexpress.us/item/3256808590663347.html), [Amazon](https://www.amazon.com/THOAML-Batteries-Altitude-Headless-360%C2%B0Flip/dp/B0F1D6F62J/) | 20% smaller DJI Neo clone. Only good for indoor flight really. 
     | Several Brands | E58 | Tested* | [Amazon](https://www.amazon.com/Foldable-Quadcopter-Beginners-Batteries-Waypoints/dp/B09KV8L7WN/) | Atleast video feed has been tested physically with this drone. Very likely will work though. |
-    | Karuisrc | K417 | Tested* | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | |
+    | Karuisrc | K417 | Tested* | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | Brushless motors! Similar body to the X29 but better build quality. |
     | Several Brands | E88/E88 Pro | Suspected | [Amazon](https://www.amazon.com/Foldable-Camera-Quadcopter-Altitude-Beginner/dp/B0DZCLFQXN) | |
     | Several Brands | E99/E99 Pro | Suspected | [Amazon](https://www.amazon.com/LJN53-Foldable-Drone-Dual-Cameras/dp/B0DRH9C6RF) | |
     | Swifsen | A35 | Suspected | [Amazon](https://a.co/d/bqKvloz) | Very small "toy" drone|
     | Unknown | LSRC-S1S | Suspected | | mentioned in another reverse-engineering effort for the WiFi UAV app|
     | Velcase    | S101            | TODO | [Amazon](https://www.amazon.com/Foldable-Beginners-Quadcopter-Carrying-Positioning/dp/B0CH341G5F/)  | lower quality build, smaller battery and props than S29 & S20|
+    | Redrie | X29 | TODO | [Amazon](https://www.amazon.com/Adults-1080P-Foldable-Altitude-Auto-Follow-Batteries/dp/B0CZQKNYL5) | Working on this one now|
 
     _**Tested** means the drone has been physically run with turbodrone to ensure its compatibility._
 
