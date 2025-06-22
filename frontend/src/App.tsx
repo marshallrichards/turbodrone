@@ -4,6 +4,7 @@ import { useControls } from "./hooks/useControls";
 import { ControlSchemeToggle } from "./components/ControlSchemeToggle";
 import VideoFeed from "./components/VideoFeed";
 import ControlsOverlay from "./components/ControlsOverlay";
+import { PluginControls } from './components/PluginControls';
 
 const ws = new WSClient("ws://localhost:8000/ws");
 
@@ -27,6 +28,7 @@ export default function App() {
       />
       <VideoFeed />
       <ControlsOverlay axes={axes} onTakeoff={handleTakeoff} onLand={handleLand} />
+      <PluginControls />
     </div>
   );
 }

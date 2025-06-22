@@ -160,3 +160,6 @@ public/
 # framework-specific (if you ever add)
 .serverless/
 .vuepress/dist/
+
+# assets
+backend/plugins/follow/assets/*
