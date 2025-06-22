@@ -34,6 +34,7 @@ from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
 from services.flight_controller import FlightController
 from services.video_receiver import VideoReceiverService
 from control.strategies import DirectStrategy, IncrementalStrategy
+from plugins.manager import PluginManager
 
 # ───────────────────────────────────────────────────────────────
 # Globals to track the pump
@@ -44,7 +45,7 @@ _pump_thread: threading.Thread | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global flight_controller, receiver, video_keepalive, _pump_stop, _pump_thread
+    global flight_controller, receiver, video_keepalive, _pump_stop, _pump_thread, plugin_manager
     drone_type = os.getenv("DRONE_TYPE", "s2x")
 
     if drone_type == "s2x":
@@ -108,22 +109,29 @@ async def lifespan(app: FastAPI):
     flight_controller = FlightController(model, rc_proto)
     flight_controller.start()
 
-    # 3. start bridge thread (daemon)
+    # 3. Plugin Manager
+    # This queue will feed frames to all active plugins
+    PLUGIN_Q = queue.Queue(maxsize=100)
+    plugin_manager = PluginManager(flight_controller, PLUGIN_Q)
+
+    # 4. start bridge thread (daemon)
     _pump_stop = threading.Event()
     main_loop = asyncio.get_running_loop()
     _pump_thread = threading.Thread(
         target=_frame_pump_worker,
-        args=(RAW_Q, _pump_stop, main_loop),
+        args=(RAW_Q, PLUGIN_Q, _pump_stop, main_loop),
         name="FramePump",
         daemon=True,
     )
     _pump_thread.start()
 
-    # 4. nothing to do – VideoReceiverService runs the keep-alive
+    # 5. nothing to do – VideoReceiverService runs the keep-alive
     
     yield
 
     # Shutdown
+    if plugin_manager:
+        plugin_manager.stop_all()
     if flight_controller:
         flight_controller.stop()
     if receiver:
@@ -153,6 +161,7 @@ FRAME_Q: asyncio.Queue[bytes] = asyncio.Queue(100)     # asyncio → /mjpeg
 
 flight_controller: Optional[FlightController] = None
 receiver: Optional[VideoReceiverService] = None
+plugin_manager: Optional[PluginManager] = None
 
 video_keepalive: "VideoKeepAlive | None" = None
 
@@ -161,6 +170,7 @@ video_keepalive: "VideoKeepAlive | None" = None
 # ───────────────────────────────────────────────────────────────
 def _frame_pump_worker(
     src_q: queue.Queue,
+    plugin_q: queue.Queue,
     stop_evt: threading.Event,
     loop: asyncio.AbstractEventLoop,       # <-- receive main loop
 ) -> None:
@@ -176,6 +186,13 @@ def _frame_pump_worker(
             continue
         if frame is None:                     # sentinel
             break
+
+        # --- Feed plugins ------------------------------------------------
+        # Plugins get the raw VideoFrame object
+        try:
+            plugin_q.put_nowait(frame)
+        except queue.Full:
+            pass # Plugins will just miss a frame
 
         # --- JPEG encode -------------------------------------------------
         if getattr(frame, "format", "jpeg") == "jpeg":
@@ -215,6 +232,33 @@ async def mjpeg() -> StreamingResponse:
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={"Cache-Control": "no-cache"},
     )
+
+
+# ───────────────────────────────────────────────────────────────
+# Plugin HTTP endpoints
+# ───────────────────────────────────────────────────────────────
+@app.get("/plugins")
+async def list_plugins():
+    if not plugin_manager:
+        return {"error": "Plugin manager not available"}
+    return {
+        "available": plugin_manager.available(),
+        "running": plugin_manager.running(),
+    }
+
+@app.post("/plugins/{name}/start")
+async def start_plugin(name: str):
+    if not plugin_manager:
+        return {"error": "Plugin manager not available"}
+    plugin_manager.start(name)
+    return {"running": plugin_manager.running()}
+
+@app.post("/plugins/{name}/stop")
+async def stop_plugin(name: str):
+    if not plugin_manager:
+        return {"error": "Plugin manager not available"}
+    plugin_manager.stop(name)
+    return {"running": plugin_manager.running()}
 
 
 # ───────────────────────────────────────────────────────────────
