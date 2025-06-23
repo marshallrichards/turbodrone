@@ -9,9 +9,11 @@ from .base import Plugin
 class PluginManager:
     def __init__(self,
                  flight_controller: FlightController,
-                 frame_queue: queue.Queue):
+                 frame_queue: queue.Queue,
+                 overlay_queue: queue.Queue):
         self._fc      = flight_controller
         self._frames_q  = frame_queue
+        self._overlay_q = overlay_queue
         self._registry: Dict[str, Type[Plugin]] = {}
         self._pool: Dict[str, Plugin] = {}
         self._discover_plugins()
@@ -35,8 +37,11 @@ class PluginManager:
                 yield self._frames_q.get()
 
         try:
-            # Pass a new, unique generator instance to the plugin
-            inst = cls(name=name, flight_controller=self._fc, frame_source=frame_iterator())
+            # Pass a new, unique generator instance and the overlay queue to the plugin
+            inst = cls(name=name,
+                       flight_controller=self._fc,
+                       frame_source=frame_iterator(),
+                       overlay_queue=self._overlay_q)
             inst.start()
             self._pool[name] = inst
         except Exception as e:

@@ -42,6 +42,41 @@ from plugins.manager import PluginManager
 _pump_stop: threading.Event | None = None
 _pump_thread: threading.Thread | None = None
 
+# List of active WebSocket connections for overlays
+overlay_websockets: list[WebSocket] = []
+
+class OverlayBroadcaster:
+    def __init__(self, overlay_q: queue.Queue, loop: asyncio.AbstractEventLoop):
+        self._q = overlay_q
+        self._loop = loop
+        self._stop_evt = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stop_evt.set()
+        self._thread.join(timeout=1)
+
+    def _run(self):
+        while not self._stop_evt.is_set():
+            try:
+                overlay_data = self._q.get(timeout=1)
+                future = asyncio.run_coroutine_threadsafe(
+                    self.broadcast(overlay_data), self._loop
+                )
+                future.result()
+            except queue.Empty:
+                continue
+
+    async def broadcast(self, data: list):
+        for ws in list(overlay_websockets):
+            try:
+                await ws.send_json(data)
+            except WebSocketDisconnect:
+                overlay_websockets.remove(ws)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -85,7 +120,7 @@ async def lifespan(app: FastAPI):
             "drone_ip":   drone_ip,
             "control_port": ctrl_port,
             "video_port": video_port,
-            "debug":      True,   # keep verbose output
+            "debug":      False,   # keep verbose output
         }
     else:
         raise ValueError(f"Unknown drone type: {drone_type}")
@@ -110,26 +145,29 @@ async def lifespan(app: FastAPI):
     flight_controller.start()
 
     # 3. Plugin Manager
-    # This queue will feed frames to all active plugins
-    PLUGIN_Q = queue.Queue(maxsize=100)
-    plugin_manager = PluginManager(flight_controller, PLUGIN_Q)
+    PLUGIN_FRAME_Q = queue.Queue(maxsize=100)
+    PLUGIN_OVERLAY_Q = queue.Queue(maxsize=100)
+    plugin_manager = PluginManager(flight_controller, PLUGIN_FRAME_Q, PLUGIN_OVERLAY_Q)
 
-    # 4. start bridge thread (daemon)
+    # 4. start bridge thread (daemon) for video pump
     _pump_stop = threading.Event()
     main_loop = asyncio.get_running_loop()
     _pump_thread = threading.Thread(
         target=_frame_pump_worker,
-        args=(RAW_Q, PLUGIN_Q, _pump_stop, main_loop),
+        args=(RAW_Q, PLUGIN_FRAME_Q, _pump_stop, main_loop),
         name="FramePump",
         daemon=True,
     )
     _pump_thread.start()
 
-    # 5. nothing to do – VideoReceiverService runs the keep-alive
+    # 5. Start overlay broadcaster
+    overlay_broadcaster = OverlayBroadcaster(PLUGIN_OVERLAY_Q, main_loop)
+    overlay_broadcaster.start()
     
     yield
 
     # Shutdown
+    overlay_broadcaster.stop()
     if plugin_manager:
         plugin_manager.stop_all()
     if flight_controller:
@@ -326,3 +364,14 @@ class VideoKeepAlive:
             self._send_start_cmd()
             # wait() lets us wake up immediately on stop()
             self._stop.wait(self._interval)
+
+@app.websocket("/ws/overlays")
+async def overlays_endpoint(ws: WebSocket):
+    await ws.accept()
+    overlay_websockets.append(ws)
+    try:
+        while True:
+            await ws.receive_text() # Keep connection open
+    except WebSocketDisconnect:
+        print("[Overlays] Client disconnected")
+        overlay_websockets.remove(ws)

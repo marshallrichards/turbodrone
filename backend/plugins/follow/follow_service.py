@@ -44,15 +44,34 @@ class FollowService(Plugin):
                 if boxes:
                     h, w, _ = img.shape
                     n_box = boxes[0]
-                    abs_box = (n_box[0]*w, n_box[1]*h, n_box[2]*w, n_box[3]*h)
-                    tracker_box = (abs_box[0], abs_box[1], abs_box[2]-abs_box[0], abs_box[3]-abs_box[1])
-                    self.tracker.init(img, tracker_box)
+
+                    json_box = [float(c) for c in n_box]
+                    self.send_overlay([{"type": "rect", "coords": json_box, "color": "yellow"}])
+                    
+                    x1, y1, x2, y2 = n_box
+                    abs_tracker_box = (x1 * w, y1 * h, x2 * w, y2 * h)
+
+                    if (x2 - x1) * w > 1 and (y2 - y1) * h > 1:
+                        tracker_box_int = tuple(map(int, abs_tracker_box))
+                        self.tracker.init(img, tracker_box_int)
+                    else:
+                        self.send_overlay([])
+                else:
+                    self.send_overlay([])
             else:
                 box, _ = self.tracker.update(img)
                 if box is None:
                     self.tracker.tracker = None
                     self.fc.set_axes(throttle=0, yaw=0, pitch=0, roll=0)
+                    self.send_overlay([])
                     continue
+
+                h, w, _ = img.shape
+                x, y, w_box, h_box = box
+                norm_box = [x/w, y/h, (x+w_box)/w, (y+h_box)/h]
+                
+                json_box = [float(c) for c in norm_box]
+                self.send_overlay([{"type": "rect", "coords": json_box, "color": "lime"}])
 
                 self.ctrl.update_target(box, img.shape[:2])
                 yaw, pitch = self.ctrl.current_commands()
