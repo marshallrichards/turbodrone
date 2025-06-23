@@ -15,10 +15,12 @@ class Plugin(ABC):
                  name: str,
                  flight_controller: FlightController,
                  frame_source: Iterator,
+                 overlay_queue = None,
                  **kwargs):
         self.name   = name
         self.fc     = flight_controller
         self.frames = frame_source
+        self.overlays = overlay_queue
         self.running = False
         self.loop_thread = None
 
@@ -39,4 +41,11 @@ class Plugin(ABC):
         ...
 
     def _on_stop(self):
-        pass 
+        pass
+
+    def send_overlay(self, data: list):
+        if self.overlays:
+            try:
+                self.overlays.put_nowait(data)
+            except:
+                pass 

@@ -1,34 +1,20 @@
-import React from "react";
-import { WSClient } from "./lib/ws";
-import { useControls } from "./hooks/useControls";
-import { ControlSchemeToggle } from "./components/ControlSchemeToggle";
-import VideoFeed from "./components/VideoFeed";
-import ControlsOverlay from "./components/ControlsOverlay";
+import { useControls } from './hooks/useControls';
+import { VideoFeed } from './components/VideoFeed';
+import ControlsOverlay from './components/ControlsOverlay';
 import { PluginControls } from './components/PluginControls';
+import { DrawingOverlay } from './components/DrawingOverlay';
 
-const ws = new WSClient("ws://localhost:8000/ws");
-
-export default function App() {
-  const { axes, mode, setMode, gamepadConnected } = useControls(ws);
-
-  const handleTakeoff = () => {
-    ws.send({ type: "takeoff" });
-  };
-
-  const handleLand = () => {
-    ws.send({ type: "land" });
-  };
+function App() {
+  const { axes, takeOff, land } = useControls();
 
   return (
-    <div className="relative min-h-screen bg-black text-white">
-      <ControlSchemeToggle 
-        mode={mode} 
-        setMode={setMode} 
-        gamepadConnected={gamepadConnected}
-      />
-      <VideoFeed />
-      <ControlsOverlay axes={axes} onTakeoff={handleTakeoff} onLand={handleLand} />
+    <div className="relative w-screen h-screen bg-black">
+      <VideoFeed src="http://localhost:8000/mjpeg" />
+      <DrawingOverlay />
+      <ControlsOverlay axes={axes} onTakeoff={takeOff} onLand={land} />
       <PluginControls />
     </div>
   );
 }
+
+export default App;
