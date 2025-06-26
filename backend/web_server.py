@@ -31,6 +31,9 @@ from protocols.s2x_video_protocol import S2xVideoProtocolAdapter
 from models.wifi_uav_rc import WifiUavRcModel
 from protocols.wifi_uav_rc_protocol_adapter import WifiUavRcProtocolAdapter
 from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
+from models.debug_rc import DebugRcModel
+from protocols.debug_rc_protocol_adapter import DebugRcProtocolAdapter
+from protocols.debug_video_protocol import DebugVideoProtocolAdapter
 from services.flight_controller import FlightController
 from services.video_receiver import VideoReceiverService
 from control.strategies import DirectStrategy, IncrementalStrategy
@@ -122,6 +125,12 @@ async def lifespan(app: FastAPI):
             "video_port": video_port,
             "debug":      False,   # keep verbose output
         }
+    elif drone_type == "debug":
+        print("[main] Using debug drone implementation.")
+        model = DebugRcModel()
+        rc_proto = DebugRcProtocolAdapter()
+        video_adapter_cls = DebugVideoProtocolAdapter
+        video_adapter_args = {"camera_index": 0, "debug": False}
     else:
         raise ValueError(f"Unknown drone type: {drone_type}")
 

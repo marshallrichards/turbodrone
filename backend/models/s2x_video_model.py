@@ -60,7 +60,7 @@ class S2xVideoModel(BaseVideoModel):
         complete = len(keys) == keys[-1] - keys[0] + 1
         if not complete:
             missing = (keys[-1] - keys[0] + 1) - len(keys)
-            print(f"[s2x-model] Dropping frame {self._cur_fid}: {missing} slices missing")
+           # print(f"[s2x-model] Dropping frame {self._cur_fid}: {missing} slices missing")
             return None
 
         data = b"".join(self._frags[k] for k in keys)
@@ -68,12 +68,12 @@ class S2xVideoModel(BaseVideoModel):
         start = data.find(self.SOI_MARKER)
         end   = data.rfind(self.EOI_MARKER)
         if start < 0 or end < 0 or end <= start:
-            print(f"[s2x-model] JPEG markers not found on frame {self._cur_fid}")
+            #print(f"[s2x-model] JPEG markers not found on frame {self._cur_fid}")
             return None
 
         jpeg = data[start : end + len(self.EOI_MARKER)]
-        print(f"[s2x-model] Frame {self._cur_fid} OK "
-              f"({len(jpeg)} bytes, {len(keys)} slices)")
+        #print(f"[s2x-model] Frame {self._cur_fid} OK "
+        #      f"({len(jpeg)} bytes, {len(keys)} slices)")
         frame = VideoFrame(self._cur_fid, jpeg, "jpeg")
 
         self._reset(None)          # prepare for next frame

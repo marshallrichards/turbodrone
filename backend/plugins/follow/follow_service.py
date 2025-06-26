@@ -27,21 +27,32 @@ class FollowService(Plugin):
             self.loop_thread.join(timeout=1.0)
 
     def _loop(self):
+        print("[FollowService] Loop started. Waiting for frames...")
+        frame_counter = 0
         for frame in self.frames:
+            frame_counter += 1
+            if frame_counter % 100 == 0:
+                print(f"[FollowService] Processed {frame_counter} frames.")
+
             if not self.running:
                 break
 
             if hasattr(frame, 'format') and frame.format == "jpeg":
                 img = cv2.imdecode(np.frombuffer(frame.data, np.uint8), cv2.IMREAD_COLOR)
-                if img is None: continue
+                if img is None:
+                    print("[FollowService] Warning: Failed to decode JPEG frame. Skipping.")
+                    continue
             elif isinstance(frame, np.ndarray):
                 img = frame
             else:
                 continue
 
             if self.tracker.tracker is None:
+                # --- DETECTION PHASE ---
+                print("[FollowService] Running person detector...")
                 boxes = self.detector.detect(img)
                 if boxes:
+                    print(f"[FollowService] DETECTED {len(boxes)} person(s). Initializing tracker.")
                     h, w, _ = img.shape
                     n_box = boxes[0]
 
@@ -54,18 +65,25 @@ class FollowService(Plugin):
                     if (x2 - x1) * w > 1 and (y2 - y1) * h > 1:
                         tracker_box_int = tuple(map(int, abs_tracker_box))
                         self.tracker.init(img, tracker_box_int)
+                        print("[FollowService] Tracker initialized successfully.")
                     else:
+                        print("[FollowService] Warning: Detected box was too small or invalid. Not tracking.")
                         self.send_overlay([])
                 else:
+                    # This will print every time detection runs and finds nothing.
+                    # print("[FollowService] No person detected in this frame.")
                     self.send_overlay([])
             else:
+                # --- TRACKING PHASE ---
                 box, _ = self.tracker.update(img)
                 if box is None:
+                    print("[FollowService] Tracker lost target. Returning to detection mode.")
                     self.tracker.tracker = None
                     self.fc.set_axes(throttle=0, yaw=0, pitch=0, roll=0)
                     self.send_overlay([])
                     continue
 
+                print("[FollowService] Tracker updated successfully. Sending new bounding box.")
                 h, w, _ = img.shape
                 x, y, w_box, h_box = box
                 norm_box = [x/w, y/h, (x+w_box)/w, (y+h_box)/h]
