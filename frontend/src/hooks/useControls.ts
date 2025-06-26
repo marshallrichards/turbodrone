@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { WSClient } from "../lib/ws";
 
 /* ─────────────────────────────────────────────────────────── */
 /*  Shared types                                               */
@@ -13,15 +12,22 @@ export interface Axes {
 }
 /* ─────────────────────────────────────────────────────────── */
 
-export function useControls(ws: WSClient): {
-  axes: Axes;
-  mode: ControlMode;
-  setMode: (m: ControlMode) => void;
-  gamepadConnected: boolean;
-} {
+export function useControls() {
   /* ------- state refs (mutable) ------- */
   const axesRef = useRef<Axes>({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
   const modeRef = useRef<ControlMode>("inc");
+
+  /* ------- NEW: websocket ref & lifecycle ------- */
+  const ws = useRef<WebSocket | null>(null);
+
+  // Open WS once on mount, close on unmount
+  useEffect(() => {
+    ws.current = new WebSocket("ws://localhost:8000/ws");
+    return () => {
+      ws.current?.close();
+      ws.current = null;
+    };
+  }, []);
 
   /* ------- state that triggers re-renders ------- */
   const [axes,  setAxes]  = useState<Axes>(axesRef.current);
@@ -193,12 +199,37 @@ export function useControls(ws: WSClient): {
 
   /* ----------- network TX 30 Hz (treat mouse as "abs") ------- */
   useEffect(() => {
-    const id = setInterval(() => {
-      const modeForBackend = modeRef.current === "mouse" ? "abs" : modeRef.current;
-      ws.send({ type: "axes", mode: modeForBackend, ...axesRef.current });
+    const interval = setInterval(() => {
+      if (ws.current?.readyState === WebSocket.OPEN) {
+        ws.current.send(JSON.stringify({
+          type: "axes",
+          mode: modeRef.current,
+          ...axesRef.current,
+        }));
+      }
     }, 1000 / 30);
-    return () => clearInterval(id);
-  }, [ws]);
+    return () => clearInterval(interval);
+  }, []);
 
-  return { axes, mode, setMode, gamepadConnected };
+  /* ------------- helpers / commands ------------------------- */
+  const sendCommand = (type: string, payload = {}) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type, ...payload }));
+    } else {
+      console.warn("Cannot send command, WebSocket not open.");
+    }
+  };
+
+  const takeOff = () => sendCommand("takeoff");
+  const land    = () => sendCommand("land");
+
+  /* ------------- hook return ------------------------------- */
+  return {
+    axes,
+    mode,
+    setMode,
+    gamepadConnected,
+    takeOff,
+    land,
+  };
 }
