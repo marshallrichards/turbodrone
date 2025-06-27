@@ -24,32 +24,39 @@ export function DrawingOverlay() {
 
       const observer = new ResizeObserver(() => {
         const img = videoElement as HTMLImageElement;
-        const rect = img.getBoundingClientRect(); // viewport-relative box
+        const rect = img.getBoundingClientRect(); // viewport-relative
 
-        // ---- visible-video size (removes letter/pillar boxes) --------------
-        const natW = img.naturalWidth || 1;
-        const natH = img.naturalHeight || 1;
+        const natW  = img.naturalWidth  || 1;
+        const natH  = img.naturalHeight || 1;
         const imgAR = natW / natH;
         const boxAR = rect.width / rect.height;
 
         let visW: number, visH: number, padX = 0, padY = 0;
-        if (imgAR > boxAR) { // black bars top/bottom
-          visW = rect.width;
-          visH = rect.width / imgAR;
-          padY = (rect.height - visH) / 2;
-        } else { // bars left/right
+        if (boxAR > imgAR) {
+          // container is wider: pillar-boxing → bars on the sides
           visH = rect.height;
           visW = rect.height * imgAR;
           padX = (rect.width - visW) / 2;
+        } else {
+          // container is narrower (or equal): letter-boxing → bars top/bottom
+          visW = rect.width;
+          visH = rect.width / imgAR;
+          padY = (rect.height - visH) / 2;
         }
+
+        // --- ⭑⭑⭑ NEW DEBUG LOG ⭑⭑⭑ ---
+        console.log(
+          `[Overlay] visible ${Math.round(visW)}×${Math.round(visH)}, ` +
+          `padX ${padX}px padY ${padY}px`
+        );
 
         // ---- position SVG over that exact area ------------------------------
         setStyle({
           position: "absolute",
-          width: visW,
-          height: visH,
-          top: rect.top + padY + window.scrollY,
-          left: rect.left + padX + window.scrollX,
+          width:    visW,
+          height:   visH,
+          top:      rect.top  + padY + window.scrollY,
+          left:     rect.left + padX + window.scrollX,
           pointerEvents: "none",
         });
       });
