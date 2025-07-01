@@ -11,12 +11,12 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
 
     | Brand      | Model Number(s)    | Compatibility | Purchase Link                                               | Notes |
     |------------|-----------------|---------------|-------------------------------------------------------------|-------|
+    | Karuisrc | K417 | Tested | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | My favorite right now. Only one on the list with brushless motors! build quality is fantastic. |
     | Loiley     | S29             | Tested    | [Amazon](https://www.amazon.com/Beginners-Altitude-Gestures-Adjustable-Batteries/dp/B0CFDVKJKC)                  | Best build quality, has servo for tilting camera(_not implemented in API yet_)|
     | Hiturbo    | S20             | Tested    | [Amazon](https://www.amazon.com/dp/B0BBVZ849G), [Alternate Amazon Listing](https://www.amazon.com/Beginners-Foldable-Quadcopter-Gestures-Batteries/dp/B0D8LK1KJ3)                  | Original test platform, great build quality|
     | FlyVista | V88 | Tested | [Amazon](https://www.amazon.com/dp/B0D5CXY6X8) | |
     | ? | D16/GT3/V66 | Tested | cheapest on [Aliexpress](https://www.aliexpress.us/item/3256808590663347.html), [Amazon](https://www.amazon.com/THOAML-Batteries-Altitude-Headless-360%C2%B0Flip/dp/B0F1D6F62J/) | 20% smaller DJI Neo clone. Only good for indoor flight really. 
     | Several Brands | E58 | Tested* | [Amazon](https://www.amazon.com/Foldable-Quadcopter-Beginners-Batteries-Waypoints/dp/B09KV8L7WN/) | Atleast video feed has been tested physically with this drone. Very likely will work though. |
-    | Karuisrc | K417 | Tested* | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | Brushless motors! Similar body to the X29 but better build quality. |
     | Several Brands | E88/E88 Pro | Suspected | [Amazon](https://www.amazon.com/Foldable-Camera-Quadcopter-Altitude-Beginner/dp/B0DZCLFQXN) | |
     | Several Brands | E99/E99 Pro | Suspected | [Amazon](https://www.amazon.com/LJN53-Foldable-Drone-Dual-Cameras/dp/B0DRH9C6RF) | |
     | Swifsen | A35 | Suspected | [Amazon](https://a.co/d/bqKvloz) | Very small "toy" drone|
@@ -32,6 +32,7 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
 
 * WiFi Dongle ([recommend ALFA Network AWUS036ACM](https://www.amazon.com/Network-AWUS036ACM-Long-Range-Wide-Coverage-High-Sensitivity/dp/B08BJS8FXD) or similar) 
   * drone broadcasts its own WiFi network so your computer will have to connect to it.
+  * Not totally necessary because you can use your computer's built-in WiFi radio to connect to the drone's network, but nice to have that way you can stay connected to the internet while flying the drone.
 
 
 ## Setup
