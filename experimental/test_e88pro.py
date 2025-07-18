@@ -1,8 +1,22 @@
-# Author: jithinbp@gmail.com
-# For the E88pro drone which is under 10$
-# Features: One touch takeoff, land, flip(all ways), fly around, view video feed.
-# Finicky features: Switching camera feed , one touch land(falls out of the sky sometimes while landing. might be a battery thing)
+'''
+Author: jithinbp@gmail.com
+For the E88pro drone which is under 10$
+Features: One touch takeoff, land, flip(all ways), fly around, view video feed.
+Finicky features: Switching camera feed , one touch land(falls out of the sky sometimes while landing. might be a battery thing)
 
+Controls
+Z : one touch takeoff
+X : land (careful)
+C : Calibrate gyro
+W/S : throttle
+A/D : YAW
+UP/DOWN: PITCH
+LEFT/RIGHT: roll
+F: FLIP (combine with up/down/left/right to specify direction of flip 
+H: toggle headless mode
+1,2 : camera selection. barely works.
+
+'''
 import sys
 import socket
 import cv2
