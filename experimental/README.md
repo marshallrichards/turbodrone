@@ -7,4 +7,4 @@ Each subdirectory corresponds to a mobile app and contains control and video pro
 
 | App Name              | Supported Drones | Notes |
 |-----------------------|------------------|-------|
-| - | - | - |
+| RC_UFO | E88 pro | PyQt5 app for flying it with a computer |
