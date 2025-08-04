@@ -1,72 +1,21 @@
-import { useEffect, useRef, useState } from "react";
 import { useOverlays } from "../hooks/useOverlays";
+import { useVideoSizing } from "../hooks/useVideoSizing";
 
-interface Box { x: number; y: number; w: number; h: number; color: string }
-
-export default function DrawingOverlay() {
+function DrawingOverlay() {
   const overlays = useOverlays();
-  const [style, setStyle] = useState<React.CSSProperties>({});
-  const overlayRef = useRef<HTMLDivElement>(null);
+  const { videoRect } = useVideoSizing();
 
-  /* ───────────────────────────
-   * Track the visible video rect
-   * ─────────────────────────── */
-  useEffect(() => {
-    const img = document.querySelector(
-      'img[alt="Drone video feed"]'
-    ) as HTMLImageElement | null;
-    if (!img) return;
+  const style: React.CSSProperties = {
+    position: "absolute",
+    left: videoRect.x,
+    top: videoRect.y,
+    width: videoRect.width,
+    height: videoRect.height,
+    pointerEvents: "none",
+  };
 
-    const calc = () => {
-      if (!img.naturalWidth) return;           // wait until frame arrived
-      const rect  = img.getBoundingClientRect();
-      const arImg = (img.naturalWidth || 1) / (img.naturalHeight || 1);
-      const arBox = rect.width / rect.height;
-
-      let w: number, h: number, x: number, y: number;
-
-      if (arBox > arImg) {
-        // bars left / right
-        h = rect.height;
-        w = h * arImg;
-        x = rect.left + (rect.width - w) / 2;
-        y = rect.top;
-      } else {
-        // bars top / bottom
-        w = rect.width;
-        h = w / arImg;
-        x = rect.left;
-        y = rect.top + (rect.height - h) / 2;
-      }
-
-      setStyle({
-        position: "absolute",
-        width: w,
-        height: h,
-        left: x + window.scrollX,
-        top: y + window.scrollY,
-        pointerEvents: "none",
-      });
-    };
-
-    // call once when the first frame arrives
-    if (img.complete) {
-      calc();
-    } else {
-      img.onload = calc;
-    }
-
-    const ro = new ResizeObserver(calc);
-    ro.observe(img);
-
-    return () => ro.disconnect();
-  }, []);
-
-  /* ───────────────────────────
-   * Render
-   * ─────────────────────────── */
   return (
-    <div ref={overlayRef} style={style} className="z-10">
+    <div style={style} className="z-10">
       <svg viewBox="0 0 1 1" width="100%" height="100%">
         {overlays.map((o, i) =>
           o.type === "rect" ? (
@@ -78,7 +27,7 @@ export default function DrawingOverlay() {
               height={o.coords[3] - o.coords[1]}
               fill="none"
               stroke={o.color || "lime"}
-              strokeWidth={2}                  // 2-px outline
+              strokeWidth={2}
               vectorEffect="non-scaling-stroke"
             />
           ) : null
@@ -88,5 +37,7 @@ export default function DrawingOverlay() {
   );
 }
 
-// Make the component available both as default *and* named export
-export { DrawingOverlay }; 
+// Making the component available as both a default and named export
+// to resolve the import issue in App.tsx.
+export { DrawingOverlay };
+export default DrawingOverlay;

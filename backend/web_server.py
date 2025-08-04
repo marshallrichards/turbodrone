@@ -1,129 +1,89 @@
-"""web_server.py – FastAPI bridge
-----------------------------------------------------------------
-* Streams MJPEG at `/mjpeg`
-* Accepts joystick/game-pad JSON over `/ws`
-----------------------------------------------------------------
-"""
-
-from __future__ import annotations
-
 import asyncio
-import os
-import queue
-from typing import Optional
 import threading
+import queue
 from contextlib import asynccontextmanager
+from typing import Optional
 
-import cv2
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
-from starlette.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.websockets import WebSocketState
+import os
+import dotenv
 
-load_dotenv()
-
-# ───────────────────────────────────────────────────────────────
-# Domain-specific imports
-# ───────────────────────────────────────────────────────────────
-from models.s2x_rc import S2xDroneModel
-from protocols.s2x_rc_protocol_adapter import S2xRCProtocolAdapter
-from protocols.s2x_video_protocol import S2xVideoProtocolAdapter
-from models.wifi_uav_rc import WifiUavRcModel
-from protocols.wifi_uav_rc_protocol_adapter import WifiUavRcProtocolAdapter
-from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
-from models.debug_rc import DebugRcModel
-from protocols.debug_rc_protocol_adapter import DebugRcProtocolAdapter
-from protocols.debug_video_protocol import DebugVideoProtocolAdapter
 from services.flight_controller import FlightController
 from services.video_receiver import VideoReceiverService
-from control.strategies import DirectStrategy, IncrementalStrategy
+from models.s2x_rc import S2xDroneModel as S2xRcModel
+from models.debug_rc import DebugRcModel
+from protocols.s2x_rc_protocol_adapter import S2xRCProtocolAdapter
+from protocols.debug_rc_protocol_adapter import DebugRcProtocolAdapter
+from protocols.s2x_video_protocol import S2xVideoProtocolAdapter
+from protocols.debug_video_protocol import DebugVideoProtocolAdapter
+from protocols.wifi_uav_rc_protocol_adapter import WifiUavRcProtocolAdapter
+from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
+from models.wifi_uav_rc import WifiUavRcModel
 from plugins.manager import PluginManager
+from utils.dropping_queue import DroppingQueue
 
-# ───────────────────────────────────────────────────────────────
-# Globals to track the pump
-# ───────────────────────────────────────────────────────────────
-_pump_stop: threading.Event | None = None
-_pump_thread: threading.Thread | None = None
 
-# List of active WebSocket connections for overlays
-overlay_websockets: list[WebSocket] = []
+class ConnectionManager:
+    """
+    Manages active WebSocket connections for broadcasting messages.
+    """
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
 
-class OverlayBroadcaster:
-    def __init__(self, overlay_q: queue.Queue, loop: asyncio.AbstractEventLoop):
-        self._q = overlay_q
-        self._loop = loop
-        self._stop_evt = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
 
-    def start(self):
-        self._thread.start()
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
-    def stop(self):
-        self._stop_evt.set()
-        self._thread.join(timeout=1)
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            if connection.client_state == WebSocketState.CONNECTED:
+                await connection.send_text(message)
 
-    def _run(self):
-        while not self._stop_evt.is_set():
-            try:
-                overlay_data = self._q.get(timeout=1)
-                future = asyncio.run_coroutine_threadsafe(
-                    self.broadcast(overlay_data), self._loop
-                )
-                future.result()
-            except queue.Empty:
-                continue
+    async def broadcast_bytes(self, message: bytes):
+        for connection in self.active_connections:
+            if connection.client_state == WebSocketState.CONNECTED:
+                await connection.send_bytes(message)
 
-    async def broadcast(self, data: list):
-        for ws in list(overlay_websockets):
-            try:
-                await ws.send_json(data)
-            except WebSocketDisconnect:
-                overlay_websockets.remove(ws)
+# Load environment variables
+dotenv.load_dotenv()
+
+# Managers for WebSocket connections
+overlay_manager = ConnectionManager()
+video_manager = ConnectionManager()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global flight_controller, receiver, video_keepalive, _pump_stop, _pump_thread, plugin_manager
-    drone_type = os.getenv("DRONE_TYPE", "s2x")
+    global flight_controller, receiver, plugin_manager, video_keepalive
+
+    drone_type = os.getenv("DRONE_TYPE", "s2x").lower()
+    
+    print(f"[main] Using drone type: {drone_type}")
 
     if drone_type == "s2x":
         print("[main] Using S2X drone implementation.")
-        default_ip = "172.16.10.1"
-        default_ctrl_port = 8080
-        default_video_port = 8888
-        
-        drone_ip = os.getenv("DRONE_IP", default_ip)
-        ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
-        video_port = int(os.getenv("VIDEO_PORT", default_video_port))
-
-        model = S2xDroneModel()
-        rc_proto = S2xRCProtocolAdapter(drone_ip, ctrl_port)
-        video_adapter_cls  = S2xVideoProtocolAdapter
+        model = S2xRcModel()
+        rc_proto = S2xRCProtocolAdapter()
+        video_adapter_cls = S2xVideoProtocolAdapter
         video_adapter_args = {
-            "drone_ip":   drone_ip,
-            "control_port": ctrl_port,
-            "video_port": video_port,
-            "debug":      False,
+            "drone_ip": os.getenv("DRONE_IP", "192.168.1.1"),
         }
-
     elif drone_type == "wifi_uav":
         print("[main] Using WiFi UAV drone implementation.")
-        default_ip = "192.168.169.1"
-        default_ctrl_port = 8800
-        default_video_port = 8800
-
-        drone_ip = os.getenv("DRONE_IP", default_ip)
-        ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
-        video_port = int(os.getenv("VIDEO_PORT", default_video_port))
-
         model = WifiUavRcModel()
-        rc_proto = WifiUavRcProtocolAdapter(drone_ip, ctrl_port)
-        video_adapter_cls  = WifiUavVideoProtocolAdapter
+        rc_proto = WifiUavRcProtocolAdapter()
+        video_adapter_cls = WifiUavVideoProtocolAdapter
         video_adapter_args = {
-            "drone_ip":   drone_ip,
-            "control_port": ctrl_port,
-            "video_port": video_port,
-            "debug":      False,   # keep verbose output
+            "rc_ip": os.getenv("RC_IP", "192.168.4.2"),
+            "pc_ip": os.getenv("PC_IP", "192.168.4.1"),
+            "debug": False,
         }
     elif drone_type == "debug":
         print("[main] Using debug drone implementation.")
@@ -154,8 +114,8 @@ async def lifespan(app: FastAPI):
     flight_controller.start()
 
     # 3. Plugin Manager
-    PLUGIN_FRAME_Q = queue.Queue(maxsize=100)
-    PLUGIN_OVERLAY_Q = queue.Queue(maxsize=100)
+    PLUGIN_FRAME_Q = DroppingQueue(maxsize=100)
+    PLUGIN_OVERLAY_Q = DroppingQueue(maxsize=100)
     plugin_manager = PluginManager(flight_controller, PLUGIN_FRAME_Q, PLUGIN_OVERLAY_Q)
 
     # 4. start bridge thread (daemon) for video pump
@@ -203,8 +163,8 @@ app.add_middleware(
 # ───────────────────────────────────────────────────────────────
 # Global objects (single-drone)
 # ───────────────────────────────────────────────────────────────
-RAW_Q: queue.Queue = queue.Queue(maxsize=200)          # thread-safe → pump
-FRAME_Q: asyncio.Queue[bytes] = asyncio.Queue(100)     # asyncio → /mjpeg
+RAW_Q: queue.Queue = DroppingQueue(maxsize=2)          # thread-safe → pump
+FRAME_Q: asyncio.Queue[bytes] = asyncio.Queue(2)     # asyncio → /mjpeg
 
 flight_controller: Optional[FlightController] = None
 receiver: Optional[VideoReceiverService] = None
@@ -213,81 +173,12 @@ plugin_manager: Optional[PluginManager] = None
 video_keepalive: "VideoKeepAlive | None" = None
 
 # ───────────────────────────────────────────────────────────────
-# Frame-pump implementation
-# ───────────────────────────────────────────────────────────────
-def _frame_pump_worker(
-    src_q: queue.Queue,
-    plugin_q: queue.Queue,
-    stop_evt: threading.Event,
-    loop: asyncio.AbstractEventLoop,       # <-- receive main loop
-) -> None:
-    """
-    Convert incoming frames to JPEG (if needed) and pass them into the
-    asyncio queue.  Runs in its own *daemon* thread.
-    """
-
-    while not stop_evt.is_set():
-        try:
-            frame = src_q.get(timeout=0.5)
-        except queue.Empty:
-            continue
-        if frame is None:                     # sentinel
-            break
-
-        # --- Feed plugins ------------------------------------------------
-        # Plugins get the raw VideoFrame object
-        try:
-            plugin_q.put_nowait(frame)
-        except queue.Full:
-            pass # Plugins will just miss a frame
-
-        # --- JPEG encode -------------------------------------------------
-        if getattr(frame, "format", "jpeg") == "jpeg":
-            jpg_bytes: bytes = frame.data
-        else:
-            ok, jpg = cv2.imencode(".jpg", frame.data)
-            if not ok:
-                continue
-            jpg_bytes = jpg.tobytes()
-        # -----------------------------------------------------------------
-
-        try:
-            loop.call_soon_threadsafe(FRAME_Q.put_nowait, jpg_bytes)
-        except asyncio.QueueFull:
-            pass
-
-
-# ───────────────────────────────────────────────────────────────
-# MJPEG HTTP endpoint
-# ───────────────────────────────────────────────────────────────
-@app.get("/mjpeg")
-async def mjpeg() -> StreamingResponse:
-    boundary = b"--frame"
-
-    async def generator():
-        while True:
-            jpg = await FRAME_Q.get()
-            yield (
-                boundary + b"\r\n"
-                + f"Content-Length: {len(jpg)}\r\n".encode()
-                + b"Content-Type: image/jpeg\r\n\r\n"
-                + jpg + b"\r\n"
-            )
-
-    return StreamingResponse(
-        generator(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={"Cache-Control": "no-cache"},
-    )
-
-
-# ───────────────────────────────────────────────────────────────
-# Plugin HTTP endpoints
+# Plugin Management
 # ───────────────────────────────────────────────────────────────
 @app.get("/plugins")
-async def list_plugins():
+async def get_plugins():
     if not plugin_manager:
-        return {"error": "Plugin manager not available"}
+        raise HTTPException(status_code=503, detail="PluginManager not available")
     return {
         "available": plugin_manager.available(),
         "running": plugin_manager.running(),
@@ -296,91 +187,167 @@ async def list_plugins():
 @app.post("/plugins/{name}/start")
 async def start_plugin(name: str):
     if not plugin_manager:
-        return {"error": "Plugin manager not available"}
-    plugin_manager.start(name)
-    return {"running": plugin_manager.running()}
+        raise HTTPException(status_code=503, detail="PluginManager not available")
+    try:
+        plugin_manager.start(name)
+        return {"status": "started"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/plugins/{name}/stop")
 async def stop_plugin(name: str):
     if not plugin_manager:
-        return {"error": "Plugin manager not available"}
-    plugin_manager.stop(name)
-    return {"running": plugin_manager.running()}
-
+        raise HTTPException(status_code=503, detail="PluginManager not available")
+    try:
+        plugin_manager.stop(name)
+        return {"status": "stopped"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ───────────────────────────────────────────────────────────────
-# WebSocket -> flight controller
+# Websocket handlers
 # ───────────────────────────────────────────────────────────────
-@app.websocket("/ws")
-async def ws_endpoint(ws: WebSocket) -> None:
-    await ws.accept()
+@app.websocket("/ws/overlays")
+async def websocket_overlay_endpoint(websocket: WebSocket):
+    await overlay_manager.connect(websocket)
     try:
         while True:
-            data = await ws.receive_json()
-            if data["type"] == "axes":
-                mode = data.get("mode", "abs")
-                if mode == "abs":
-                    if not isinstance(flight_controller.model.strategy, DirectStrategy):
-                        flight_controller.model.set_strategy(DirectStrategy())
-                else:   # "inc"
-                    if not isinstance(flight_controller.model.strategy, IncrementalStrategy):
-                        flight_controller.model.set_strategy(IncrementalStrategy())
-
-                flight_controller.set_axes(
-                    data["throttle"], data["yaw"], data["pitch"], data["roll"]
-                )
-            elif data["type"] == "set_profile":
-                flight_controller.model.set_profile(data["name"])
-            elif data["type"] == "takeoff":
-                if flight_controller and hasattr(flight_controller.model, 'takeoff'):
-                    flight_controller.model.takeoff()
-                    print("[WebSocket] Takeoff command received")
-            elif data["type"] == "land":
-                if flight_controller and hasattr(flight_controller.model, 'land'):
-                    flight_controller.model.land()
-                    print("[WebSocket] Land command received")
+            await websocket.receive_text() # Keep connection open
     except WebSocketDisconnect:
-        print("[WebSocket] Client disconnected")
-        # Optionally, reset controls or land the drone if appropriate
-        # if flight_controller and hasattr(flight_controller.model, 'land'):
-        #     flight_controller.model.land() # Example: auto-land on disconnect
+        overlay_manager.disconnect(websocket)
+
+@app.websocket("/ws/rc")
+async def websocket_rc_endpoint(websocket: WebSocket):
+    """
+    Handles incoming RC commands from the client.
+    """
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_json()
+            if flight_controller:
+                flight_controller.update_axes(data)
+    except WebSocketDisconnect:
+        print("[RC] Client disconnected.")
     except Exception as e:
-        print(f"[WebSocket] Error: {e}")
+        print(f"[RC] Error: {e}")
 
+# ───────────────────────────────────────────────────────────────
+# Video streaming
+# ───────────────────────────────────────────────────────────────
 
-class VideoKeepAlive:
-    """Periodically sends a start-stream command to the drone until stopped."""
+class VideoKeepAlive(threading.Thread):
+    def __init__(self, q: queue.Queue, timeout: int = 1):
+        super().__init__(daemon=True)
+        self._q = q
+        self._timeout = timeout
+        self._stop = threading.Event()
 
-    def __init__(self, send_start_cmd, interval: float = 2.0):
-        self._send_start_cmd = send_start_cmd
-        self._interval       = interval
-        self._stop           = threading.Event()
-        self._thread         = threading.Thread(
-            target=self._loop,
-            name="VideoKeepAlive",
-            daemon=True
-        )
-
-    def start(self):
-        self._thread.start()
+    def run(self):
+        while not self._stop.is_set():
+            try:
+                self._q.get(timeout=self._timeout)
+            except queue.Empty:
+                print("[MJPEG] Keep-alive failed. Stopping video stream.")
+                break
+        
+        # This will terminate the /mjpeg endpoint stream
+        try:
+            FRAME_Q.put_nowait(None)
+        except asyncio.QueueFull:
+            pass # Loop may already be closing
 
     def stop(self):
         self._stop.set()
-        self._thread.join(timeout=1.0)
 
-    def _loop(self):
-        while not self._stop.is_set():
-            self._send_start_cmd()
-            # wait() lets us wake up immediately on stop()
-            self._stop.wait(self._interval)
+def _frame_pump_worker(
+    raw_q: queue.Queue,
+    plugin_q: queue.Queue,
+    stop_event: threading.Event,
+    loop: asyncio.AbstractEventLoop,
+):
+    """
+    This worker runs in a separate thread and pumps frames from the
+    thread-safe queue to the asyncio queues.
+    """
+    global video_keepalive
+    if video_keepalive:
+        video_keepalive.stop()
+    
+    video_keepalive = VideoKeepAlive(raw_q)
+    video_keepalive.start()
 
-@app.websocket("/ws/overlays")
-async def overlays_endpoint(ws: WebSocket):
-    await ws.accept()
-    overlay_websockets.append(ws)
-    try:
+    while not stop_event.is_set():
+        try:
+            frame = raw_q.get(timeout=1.0)
+            if frame:
+                # Put to MJPEG stream
+                try:
+                    # Non-blocking put, or drop if the queue is full
+                    FRAME_Q.put_nowait(frame.data)
+                except asyncio.QueueFull:
+                    # This is okay, it means the client is not consuming frames fast enough
+                    pass
+                
+                # Put to plugin manager
+                try:
+                    plugin_q.put_nowait(frame)
+                except queue.Full:
+                    pass
+
+        except queue.Empty:
+            continue
+
+    if video_keepalive:
+        video_keepalive.stop()
+
+@app.get("/mjpeg")
+async def mjpeg_stream():
+    """
+    Streams JPEG frames over HTTP multipart/x-mixed-replace.
+    """
+    from fastapi.responses import StreamingResponse
+    
+    async def frame_generator():
         while True:
-            await ws.receive_text() # Keep connection open
-    except WebSocketDisconnect:
-        print("[Overlays] Client disconnected")
-        overlay_websockets.remove(ws)
+            frame = await FRAME_Q.get()
+            if frame is None:
+                break
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+            )
+
+    return StreamingResponse(
+        frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+class OverlayBroadcaster:
+    def __init__(self, q: queue.Queue, loop: asyncio.AbstractEventLoop):
+        self.q = q
+        self.loop = loop
+        self.thread: Optional[threading.Thread] = None
+        self.stop_event = threading.Event()
+
+    def start(self):
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+        if self.thread:
+            self.thread.join(timeout=1.0)
+
+    def _run(self):
+        while not self.stop_event.is_set():
+            try:
+                data = self.q.get(timeout=0.1)
+                if data:
+                    future = asyncio.run_coroutine_threadsafe(
+                        overlay_manager.broadcast(data), self.loop
+                    )
+                    future.result(timeout=1.0)
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"[OverlayBroadcaster] Error: {e}")

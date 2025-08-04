@@ -2,12 +2,15 @@ import threading
 import cv2
 import numpy as np
 from ultralytics import YOLO
+import time
+import json
 
 from ..base import Plugin
 from .follow_controller import FollowController
 
 class FollowService(Plugin):
-    CONFIDENCE_THRESHOLD = 0.5
+    CONFIDENCE_THRESHOLD = 0.65
+    FRAME_RATE = 20  # frames per second
 
     def _on_start(self):
         self.model = YOLO("yolov10n.pt")
@@ -21,7 +24,15 @@ class FollowService(Plugin):
 
     def _loop(self):
         print("[FollowService] Loop started. Waiting for frames...")
+        last_frame_time = 0
+        frame_interval = 1.0 / self.FRAME_RATE
+
         for frame in self.frames:
+            current_time = time.time()
+            if current_time - last_frame_time < frame_interval:
+                continue
+            last_frame_time = current_time
+
             if not self.running:
                 break
 
@@ -53,7 +64,8 @@ class FollowService(Plugin):
                 # Send overlay
                 h, w, _ = img.shape
                 norm_box = [float(c) for c in [x1/w, y1/h, x2/w, y2/h]]
-                self.send_overlay([{"type": "rect", "coords": norm_box, "color": "lime"}])
+                overlay_data = [{"type": "rect", "coords": norm_box, "color": "lime"}]
+                self.send_overlay(json.dumps(overlay_data))
 
                 # Update controller
                 self.ctrl.update_target((x1, y1, w_box, h_box), img.shape[:2])
@@ -62,4 +74,4 @@ class FollowService(Plugin):
             else:
                 # No person detected
                 self.fc.set_axes(throttle=0, yaw=0, pitch=0, roll=0)
-                self.send_overlay([])
+                self.send_overlay(json.dumps([]))
