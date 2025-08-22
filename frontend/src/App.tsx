@@ -1,4 +1,3 @@
-import React from "react";
 import { WSClient } from "./lib/ws";
 import { useControls } from "./hooks/useControls";
 import { ControlSchemeToggle } from "./components/ControlSchemeToggle";

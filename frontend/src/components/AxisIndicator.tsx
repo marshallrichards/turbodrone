@@ -1,5 +1,3 @@
-import React from "react";
-
 interface Props {
   x: number;           // -1 … +1 (left … right)
   y: number;           // -1 … +1 (down … up)   – positive y = up

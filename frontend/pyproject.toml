@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "turbodrone-frontend"
+version = "0.1.0"
+description = "Frontend for TurboDrone"
+requires-python = ">=3.8"
+license = "Apache-2.0"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+]
+
+[project.scripts]
+turbodrone-frontend = "turbodrone_frontend_server.main:main"

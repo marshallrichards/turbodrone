@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "turbodrone-backend"
+version = "0.1.0"
+description = "Backend for TurboDrone"
+requires-python = ">=3.8"
+license = "Apache-2.0"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy>=1.19.2",
+    "opencv-python>=4.5.1.48",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "starlette",
+    "python-dotenv",
+    "windows-curses; sys_platform == 'win32'",
+]
+
+[project.scripts]
+turbodrone-cli = "main:main"
+turbodrone-web = "web_server:main"
+turbodrone-video-client = "video_client:main"
+turbodrone-remote-control = "remote_control:main"
+turbodrone-receive-video = "receive_video:main"
+
+[tool.setuptools]
+packages = ["control", "models", "protocols", "services", "utils", "views"]
+py-modules = ["main", "receive_video", "remote_control", "video_client", "web_server", "receive_video"]
