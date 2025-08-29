@@ -1,3 +1,35 @@
+
+<div align="right">
+  <details>
+    <summary >🌐 Language</summary>
+    <div>
+      <div align="center">
+        <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=en">English</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=zh-CN">简体中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=zh-TW">繁體中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=ja">日本語</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=ko">한국어</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=hi">हिन्दी</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=th">ไทย</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=fr">Français</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=de">Deutsch</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=es">Español</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=it">Italiano</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=ru">Русский</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=pt">Português</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=nl">Nederlands</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=pl">Polski</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=ar">العربية</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=fa">فارسی</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=tr">Türkçe</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=vi">Tiếng Việt</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=id">Bahasa Indonesia</a>
+        | <a href="https://openaitx.github.io/view.html?user=marshallrichards&project=turbodrone&lang=as">অসমীয়া</
+      </div>
+    </div>
+  </details>
+</div>
+
 # Turbodrone
 Reverse-engineered API and client for controlling some of the best-selling ~$50 "toy" drones on Amazon from a computer replacing the closed-source mobile apps they come with.
 
