@@ -11,6 +11,7 @@ import os
 import dotenv
 
 from services.flight_controller import FlightController
+from control.strategies import DirectStrategy, IncrementalStrategy
 from services.video_receiver import VideoReceiverService
 from models.s2x_rc import S2xDroneModel as S2xRcModel
 from models.debug_rc import DebugRcModel
@@ -216,21 +217,53 @@ async def websocket_overlay_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         overlay_manager.disconnect(websocket)
 
-@app.websocket("/ws/rc")
-async def websocket_rc_endpoint(websocket: WebSocket):
-    """
-    Handles incoming RC commands from the client.
-    """
+@app.websocket("/ws")
+async def ws_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     try:
         while True:
             data = await websocket.receive_json()
-            if flight_controller:
-                flight_controller.update_axes(data)
+            if not flight_controller:
+                continue
+
+            msg_type = data.get("type")
+            if msg_type == "axes":
+                mode = data.get("mode", "abs")
+                # Switch strategy based on mode (treat "mouse" as absolute)
+                try:
+                    if mode in ("abs", "mouse"):
+                        if not isinstance(flight_controller.model.strategy, DirectStrategy):
+                            flight_controller.model.set_strategy(DirectStrategy())
+                    else:
+                        if not isinstance(flight_controller.model.strategy, IncrementalStrategy):
+                            flight_controller.model.set_strategy(IncrementalStrategy())
+                except Exception:
+                    pass
+
+                throttle = float(data.get("throttle", 0))
+                yaw      = float(data.get("yaw", 0))
+                pitch    = float(data.get("pitch", 0))
+                roll     = float(data.get("roll", 0))
+                flight_controller.set_axes(throttle, yaw, pitch, roll)
+            elif msg_type == "set_profile":
+                try:
+                    flight_controller.model.set_profile(data.get("name", "normal"))
+                except Exception:
+                    pass
+            elif msg_type == "takeoff":
+                try:
+                    flight_controller.model.takeoff()
+                except Exception:
+                    pass
+            elif msg_type == "land":
+                try:
+                    flight_controller.model.land()
+                except Exception:
+                    pass
     except WebSocketDisconnect:
-        print("[RC] Client disconnected.")
+        print("[WebSocket] Client disconnected")
     except Exception as e:
-        print(f"[RC] Error: {e}")
+        print(f"[WebSocket] Error: {e}")
 
 # ───────────────────────────────────────────────────────────────
 # Video streaming

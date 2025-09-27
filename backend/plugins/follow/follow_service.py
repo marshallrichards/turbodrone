@@ -4,21 +4,48 @@ import numpy as np
 from ultralytics import YOLO
 import time
 import json
+import os
 
 from ..base import Plugin
 from .follow_controller import FollowController
+from control.strategies import DirectStrategy
 
 class FollowService(Plugin):
     CONFIDENCE_THRESHOLD = 0.65
     FRAME_RATE = 20  # frames per second
 
     def _on_start(self):
-        self.model = YOLO("yolov10n.pt")
+        # Resolve YOLO weights path robustly: env override → file-relative default → name fallback
+        weights_env = os.getenv("YOLO_WEIGHTS")
+        if weights_env and os.path.exists(weights_env):
+            weights_path = weights_env
+        else:
+            # backend/plugins/follow/ -> backend/yolov10n.pt
+            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            default_weights = os.path.join(repo_root, "yolov10n.pt")
+            weights_path = default_weights if os.path.exists(default_weights) else "yolov10n.pt"
+
+        self.model = YOLO(weights_path)
         self.ctrl = FollowController(self.fc)
+
+        # Switch RC model to DirectStrategy for responsive autonomous control
+        self._prev_strategy = getattr(self.fc.model, "strategy", None)
+        try:
+            self.fc.model.set_strategy(DirectStrategy())
+        except Exception:
+            pass
+
         self.loop_thread = threading.Thread(target=self._loop, daemon=True)
         self.loop_thread.start()
 
     def _on_stop(self):
+        # Restore previous strategy if we changed it
+        try:
+            if hasattr(self, "_prev_strategy") and self._prev_strategy is not None:
+                self.fc.model.set_strategy(self._prev_strategy)
+        except Exception:
+            pass
+
         if self.loop_thread:
             self.loop_thread.join(timeout=1.0)
 
@@ -46,12 +73,21 @@ class FollowService(Plugin):
                 continue
 
             results = self.model(img, stream=True, verbose=False)
-            
+
             persons = []
             for r in results:
-                for box in r.boxes:
-                    if box.cls == 0 and box.conf > self.CONFIDENCE_THRESHOLD:
-                        persons.append(box.xyxy[0])
+                # r.boxes may be empty
+                for box in getattr(r, "boxes", []) or []:
+                    try:
+                        cls_id = int(box.cls[0].item())
+                        conf = float(box.conf[0].item())
+                        if cls_id == 0 and conf > self.CONFIDENCE_THRESHOLD:
+                            # Convert to plain floats [x1, y1, x2, y2]
+                            xyxy = box.xyxy[0].tolist()
+                            persons.append(xyxy)
+                    except Exception:
+                        # Skip any malformed detection
+                        continue
 
             if persons:
                 # Track the largest person detected
