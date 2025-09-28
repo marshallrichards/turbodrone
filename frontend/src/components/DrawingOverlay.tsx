@@ -16,7 +16,7 @@ function DrawingOverlay() {
 
   return (
     <div style={style} className="z-10">
-      <svg viewBox="0 0 1 1" width="100%" height="100%">
+      <svg viewBox="0 0 1 1" width="100%" height="100%" preserveAspectRatio="none">
         {overlays.map((o, i) =>
           o.type === "rect" ? (
             <rect

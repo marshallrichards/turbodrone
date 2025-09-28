@@ -50,6 +50,14 @@ class FollowService(Plugin):
         self.HYBRID_DETECT = os.getenv("HYBRID_DETECT", "false").lower() in ("1", "true", "yes", "on")
         self.DETECT_EVERY = max(1, int(os.getenv("FOLLOW_DETECT_EVERY", "5")))
 
+        # Debug overlay toggle: draw full-frame border to verify alignment
+        self.DEBUG_OVERLAY = os.getenv("FOLLOW_DEBUG_OVERLAY", "false").lower() in ("1", "true", "yes", "on")
+        self.DEBUG_BORDER_COLOR = os.getenv("FOLLOW_DEBUG_BORDER_COLOR", "yellow")
+
+        # Logging toggle for centering diagnostics
+        self.LOG_ENABLED = os.getenv("FOLLOW_LOG_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+        self.LOG_INTERVAL = float(os.getenv("FOLLOW_LOG_INTERVAL", "2.0"))
+
         # Resolve YOLO weights path robustly: env override → file-relative default → name fallback
         weights_env = os.getenv("YOLO_WEIGHTS")
         if weights_env and os.path.exists(weights_env):
@@ -61,7 +69,14 @@ class FollowService(Plugin):
             weights_path = default_weights if os.path.exists(default_weights) else "yolov10n.pt"
 
         self.model = YOLO(weights_path)
-        self.ctrl = FollowController(self.fc)
+
+        # Centering tolerance (± percentage of frame width around center)
+        center_deadzone = float(os.getenv("FOLLOW_CENTER_DEADZONE", "0.05"))
+
+        self.ctrl = FollowController(
+            self.fc,
+            yaw_deadzone=center_deadzone,
+        )
 
         # Tracker state (for hybrid mode)
         self._tracker = None
@@ -93,6 +108,7 @@ class FollowService(Plugin):
         last_frame_time = 0
         frame_interval = 1.0 / self.FRAME_RATE
         frame_idx = 0
+        last_log_time = 0.0
 
         for frame in self.frames:
             current_time = time.time()
@@ -215,13 +231,32 @@ class FollowService(Plugin):
                     float(y2_draw / h),
                 ]
                 overlay_data = [{"type": "rect", "coords": norm_box, "color": "lime"}]
+                if self.DEBUG_OVERLAY:
+                    overlay_data.insert(0, {"type": "rect", "coords": [0.0, 0.0, 1.0, 1.0], "color": self.DEBUG_BORDER_COLOR})
                 self.send_overlay(json.dumps(overlay_data))
 
                 # Update controller
                 self.ctrl.update_target((x, y, w_box, h_box), img.shape[:2])
                 yaw, pitch = self.ctrl.current_commands()
                 self.fc.set_axes(throttle=0, yaw=yaw / 100.0, pitch=pitch / 100.0, roll=0)
+
+                # Periodic centering diagnostics
+                now = time.time()
+                if self.LOG_ENABLED and now - last_log_time >= self.LOG_INTERVAL:
+                    box_center_x = (x + w_box / 2.0) / float(w)
+                    center_error = box_center_x - 0.5
+                    center_pct = center_error * 100.0
+                    side = "right" if center_pct > 0 else ("left" if center_pct < 0 else "center")
+                    print(
+                        f"[FollowService] center_offset: {center_pct:+5.1f}% ({side}), "
+                        f"box_width: {w_box/float(w)*100:4.1f}% of frame, yaw={yaw:5.1f}, pitch={pitch:5.1f}"
+                    )
+                    last_log_time = now
             else:
                 # No target available
                 self.fc.set_axes(throttle=0, yaw=0, pitch=0, roll=0)
-                self.send_overlay(json.dumps([]))
+                if self.DEBUG_OVERLAY:
+                    debug_overlay = [{"type": "rect", "coords": [0.0, 0.0, 1.0, 1.0], "color": self.DEBUG_BORDER_COLOR}]
+                    self.send_overlay(json.dumps(debug_overlay))
+                else:
+                    self.send_overlay(json.dumps([]))
