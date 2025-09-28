@@ -70,20 +70,41 @@ async def lifespan(app: FastAPI):
 
     if drone_type == "s2x":
         print("[main] Using S2X drone implementation.")
+        # Allow overriding IP and ports via env to match prior behavior
+        default_ip = "172.16.10.1"
+        default_ctrl_port = 8080
+        default_video_port = 8888
+
+        drone_ip = os.getenv("DRONE_IP", default_ip)
+        ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
+        video_port = int(os.getenv("VIDEO_PORT", default_video_port))
+
         model = S2xRcModel()
-        rc_proto = S2xRCProtocolAdapter()
+        rc_proto = S2xRCProtocolAdapter(drone_ip, ctrl_port)
         video_adapter_cls = S2xVideoProtocolAdapter
         video_adapter_args = {
-            "drone_ip": os.getenv("DRONE_IP", "192.168.1.1"),
+            "drone_ip": drone_ip,
+            "control_port": ctrl_port,
+            "video_port": video_port,
         }
     elif drone_type == "wifi_uav":
         print("[main] Using WiFi UAV drone implementation.")
+        # Align with previous working setup: env-configurable IP and ports
+        default_ip = "192.168.169.1"
+        default_ctrl_port = 8800
+        default_video_port = 8800
+
+        drone_ip = os.getenv("DRONE_IP", default_ip)
+        ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
+        video_port = int(os.getenv("VIDEO_PORT", default_video_port))
+
         model = WifiUavRcModel()
-        rc_proto = WifiUavRcProtocolAdapter()
+        rc_proto = WifiUavRcProtocolAdapter(drone_ip, ctrl_port)
         video_adapter_cls = WifiUavVideoProtocolAdapter
         video_adapter_args = {
-            "rc_ip": os.getenv("RC_IP", "192.168.4.2"),
-            "pc_ip": os.getenv("PC_IP", "192.168.4.1"),
+            "drone_ip": drone_ip,
+            "control_port": ctrl_port,
+            "video_port": video_port,
             "debug": False,
         }
     elif drone_type == "debug":

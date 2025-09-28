@@ -1,4 +1,5 @@
 import socket
+import queue
 import threading
 import time
 from typing import Dict, Optional
@@ -199,6 +200,67 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         with self._sock_lock:
             return self._sock
 
+    def set_rc_adapter(self, rc_adapter) -> None:
+        """Provide the RC adapter with our shared UDP socket."""
+        try:
+            rc_adapter.set_socket(self._sock)
+            self._dbg("[wifi-uav] RC adapter socket shared")
+        except Exception:
+            # If the RC adapter is not ready or doesn't support socket injection,
+            # ignore and continue – the receiver loop will still function.
+            pass
+
+    # ------------------------------------------------------------------ #
+    # Receiver thread API expected by VideoReceiverService
+    # ------------------------------------------------------------------ #
+    def start(self) -> None:
+        if hasattr(self, "_rx_thread") and self._rx_thread and self._rx_thread.is_alive():
+            return
+        # Small frame buffer; upstream will drop if slow
+        self._frame_q: "queue.Queue[VideoFrame]" = queue.Queue(maxsize=2)
+        self._pkt_buffer: list[bytes] = []
+
+        def _rx_loop() -> None:
+            sock = self.get_receiver_socket()
+            while self._running:
+                try:
+                    payload = self.recv_from_socket(sock)
+                    if not payload:
+                        continue
+                    # Collect raw packet bytes for optional dumping
+                    self._pkt_buffer.append(payload)
+                    # Try to assemble a frame
+                    frame = self.handle_payload(payload)
+                    if frame is not None:
+                        try:
+                            self._frame_q.put(frame, timeout=0.2)
+                        except queue.Full:
+                            # Drop frame if consumer is slow
+                            pass
+                except OSError:
+                    # Socket likely closed during stop(); exit loop
+                    break
+                except Exception as e:
+                    self._dbg(f"[wifi-uav] rx error: {e}")
+                    continue
+
+        self._rx_thread = threading.Thread(target=_rx_loop, daemon=True, name="WifiUavVideoRx")
+        self._rx_thread.start()
+
+    def is_running(self) -> bool:
+        return bool(self._running and getattr(self, "_rx_thread", None) and self._rx_thread.is_alive())
+
+    def get_frame(self, timeout: float = 1.0) -> Optional[VideoFrame]:
+        try:
+            return self._frame_q.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def get_packets(self) -> list[bytes]:
+        packets = getattr(self, "_pkt_buffer", [])
+        self._pkt_buffer = []
+        return packets
+
     # ------------------------------------------------------------------ #
     # watchdog
     # ------------------------------------------------------------------ #
@@ -245,6 +307,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         try:
             if self._watchdog and self._watchdog.is_alive():
                 self._watchdog.join(timeout=0.5)
+            if hasattr(self, "_rx_thread") and self._rx_thread and self._rx_thread.is_alive():
+                self._rx_thread.join(timeout=0.5)
             self._sock.close()
         except Exception as e:
             self._dbg(f"Ignoring error during shutdown: {e}")
