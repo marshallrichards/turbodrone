@@ -1,7 +1,8 @@
 import ipaddress
 import socket
 import threading
-from typing import Optional
+import queue
+from typing import Optional, List
 
 from models.s2x_video_model import S2xVideoModel
 from models.video_frame import VideoFrame
@@ -32,6 +33,10 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self._keepalive_stop: Optional[threading.Event] = None
         if debug:
             print(f"[s2x] Video socket on *:{self._sock.getsockname()[1]}")
+        self._running = threading.Event()
+        self._rx_thread: Optional[threading.Thread] = None
+        self._frame_q: "queue.Queue[VideoFrame]" = queue.Queue(maxsize=2)
+        self._pkt_buffer: List[bytes] = []
 
     # ────────── BaseVideoProtocolAdapter ────────── #
     def send_start_command(self) -> None:
@@ -107,6 +112,9 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
         """Shuts down the adapter, required by the new VideoReceiverService."""
         print("[s2x] Stopping protocol adapter.")
         self.stop_keepalive()
+        self._running.clear()
+        if self._rx_thread and self._rx_thread.is_alive():
+            self._rx_thread.join(timeout=1.0)
         try:
             self._sock.close()
         except Exception:
@@ -117,6 +125,49 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
         while not stop_event.is_set():
             self.send_start_command()
             stop_event.wait(interval)
+
+    # ────────── Receiver thread API (service expects) ────────── #
+    def start(self) -> None:
+        if self._rx_thread and self._rx_thread.is_alive():
+            return
+        self._running.set()
+        self.start_keepalive(2.0)
+
+        def _rx_loop() -> None:
+            sock = self.get_receiver_socket()
+            while self._running.is_set():
+                try:
+                    payload = self.recv_from_socket(sock)
+                    if not payload:
+                        continue
+                    self._pkt_buffer.append(payload)
+                    frame = self.handle_payload(payload)
+                    if frame is not None:
+                        try:
+                            self._frame_q.put(frame, timeout=0.2)
+                        except queue.Full:
+                            pass
+                except OSError:
+                    break
+                except Exception:
+                    continue
+
+        self._rx_thread = threading.Thread(target=_rx_loop, daemon=True, name="S2xVideoRx")
+        self._rx_thread.start()
+
+    def is_running(self) -> bool:
+        return self._running.is_set() and self._rx_thread is not None and self._rx_thread.is_alive()
+
+    def get_frame(self, timeout: float = 1.0) -> Optional[VideoFrame]:
+        try:
+            return self._frame_q.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def get_packets(self) -> List[bytes]:
+        packets = self._pkt_buffer
+        self._pkt_buffer = []
+        return packets
 
     def _discover_local_ip(self) -> str:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
