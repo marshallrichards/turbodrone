@@ -12,9 +12,44 @@ from control.strategies import DirectStrategy
 
 class FollowService(Plugin):
     CONFIDENCE_THRESHOLD = 0.65
-    FRAME_RATE = 20  # frames per second
+    FRAME_RATE = 20  # default frames per second; can be overridden via env
 
     def _on_start(self):
+        # ---- Thread caps for better CPU behavior on low-end hardware----
+        try:
+            # Torch thread caps (lazy import so we don't require torch globally if backend changes)
+            import torch  # noqa: WPS433 (local import by design)
+            # Respect user-provided env overrides if set; otherwise use conservative defaults
+            torch_threads = int(os.getenv("TORCH_NUM_THREADS", "2"))
+            torch.set_num_threads(max(1, torch_threads))
+            torch.set_num_interop_threads(1)
+        except Exception:
+            pass
+
+        try:
+            # OpenCV thread cap
+            cv2.setNumThreads(1)
+        except Exception:
+            pass
+
+        # Helpful BLAS/OpenMP caps (only set if user didn't already)
+        os.environ.setdefault("OMP_NUM_THREADS", "2")
+        os.environ.setdefault("MKL_NUM_THREADS", "2")
+
+        # ---- Runtime configuration via environment variables ----
+        # FPS (frames processed per second)
+        self.FRAME_RATE = int(os.getenv("FOLLOW_FPS", str(self.FRAME_RATE)))
+        # YOLO image size (short side). Typical values: 256, 320, 384
+        self.IMG_SIZE = int(os.getenv("YOLO_IMG_SIZE", "320"))
+        # Optional: override confidence threshold
+        self.CONFIDENCE_THRESHOLD = float(os.getenv(
+            "YOLO_CONFIDENCE", str(self.CONFIDENCE_THRESHOLD)
+        ))
+
+        # Hybrid detect-then-track toggle and cadence
+        self.HYBRID_DETECT = os.getenv("HYBRID_DETECT", "false").lower() in ("1", "true", "yes", "on")
+        self.DETECT_EVERY = max(1, int(os.getenv("FOLLOW_DETECT_EVERY", "5")))
+
         # Resolve YOLO weights path robustly: env override → file-relative default → name fallback
         weights_env = os.getenv("YOLO_WEIGHTS")
         if weights_env and os.path.exists(weights_env):
@@ -27,6 +62,10 @@ class FollowService(Plugin):
 
         self.model = YOLO(weights_path)
         self.ctrl = FollowController(self.fc)
+
+        # Tracker state (for hybrid mode)
+        self._tracker = None
+        self._tracked_box = None  # (x, y, w, h)
 
         # Switch RC model to DirectStrategy for responsive autonomous control
         self._prev_strategy = getattr(self.fc.model, "strategy", None)
@@ -53,6 +92,7 @@ class FollowService(Plugin):
         print("[FollowService] Loop started. Waiting for frames...")
         last_frame_time = 0
         frame_interval = 1.0 / self.FRAME_RATE
+        frame_idx = 0
 
         for frame in self.frames:
             current_time = time.time()
@@ -71,43 +111,117 @@ class FollowService(Plugin):
                 img = frame
             else:
                 continue
+            frame_idx += 1
 
-            results = self.model(img, stream=True, verbose=False)
+            def run_detection_on_image(image):
+                persons_local = []
+                try:
+                    results_local = self.model(
+                        image,
+                        stream=True,
+                        verbose=False,
+                        classes=[0],                # only 'person'
+                        imgsz=self.IMG_SIZE,
+                        conf=self.CONFIDENCE_THRESHOLD,
+                    )
+                except Exception:
+                    results_local = []
+                for r_ in results_local:
+                    for box in getattr(r_, "boxes", []) or []:
+                        try:
+                            cls_id = int(box.cls[0].item())
+                            conf = float(box.conf[0].item())
+                            if cls_id == 0 and conf > self.CONFIDENCE_THRESHOLD:
+                                xyxy = box.xyxy[0].tolist()
+                                persons_local.append(xyxy)
+                        except Exception:
+                            continue
+                return persons_local
 
-            persons = []
-            for r in results:
-                # r.boxes may be empty
-                for box in getattr(r, "boxes", []) or []:
+            def init_tracker_from_xyxy(x1, y1, x2, y2):
+                # Convert to (x, y, w, h)
+                bbox = (float(x1), float(y1), float(x2 - x1), float(y2 - y1))
+                tracker = None
+                # MOSSE is very fast; fallback to CSRT if MOSSE unavailable
+                try:
+                    tracker = cv2.legacy.TrackerMOSSE_create()
+                except Exception:
                     try:
-                        cls_id = int(box.cls[0].item())
-                        conf = float(box.conf[0].item())
-                        if cls_id == 0 and conf > self.CONFIDENCE_THRESHOLD:
-                            # Convert to plain floats [x1, y1, x2, y2]
-                            xyxy = box.xyxy[0].tolist()
-                            persons.append(xyxy)
+                        tracker = cv2.TrackerMOSSE_create()
                     except Exception:
-                        # Skip any malformed detection
-                        continue
+                        try:
+                            tracker = cv2.legacy.TrackerCSRT_create()
+                        except Exception:
+                            try:
+                                tracker = cv2.TrackerCSRT_create()
+                            except Exception:
+                                tracker = None
+                if tracker is not None:
+                    try:
+                        tracker.init(img, bbox)
+                        return tracker, bbox
+                    except Exception:
+                        return None, None
+                return None, None
 
-            if persons:
-                # Track the largest person detected
-                largest_person = max(persons, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
-                x1, y1, x2, y2 = largest_person
-                
-                w_box = x2 - x1
-                h_box = y2 - y1
+            box_for_control = None  # (x, y, w, h)
+
+            if self.HYBRID_DETECT:
+                should_detect = (self._tracker is None) or (frame_idx % self.DETECT_EVERY == 0)
+                if should_detect:
+                    persons = run_detection_on_image(img)
+                    if persons:
+                        largest = max(persons, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+                        x1, y1, x2, y2 = largest
+                        self._tracker, self._tracked_box = init_tracker_from_xyxy(x1, y1, x2, y2)
+                        if self._tracked_box is not None:
+                            box_for_control = self._tracked_box
+                        else:
+                            box_for_control = (x1, y1, x2 - x1, y2 - y1)
+                    else:
+                        self._tracker = None
+                        self._tracked_box = None
+                else:
+                    if self._tracker is not None:
+                        try:
+                            ok, bbox = self._tracker.update(img)
+                        except Exception:
+                            ok, bbox = False, None
+                        if ok and bbox is not None:
+                            self._tracked_box = bbox
+                            box_for_control = bbox
+                        else:
+                            self._tracker = None
+                            self._tracked_box = None
+
+            else:
+                # Pure detection every processed frame (with class filter and smaller imgsz)
+                persons = run_detection_on_image(img)
+                if persons:
+                    largest = max(persons, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+                    x1, y1, x2, y2 = largest
+                    box_for_control = (x1, y1, (x2 - x1), (y2 - y1))
+
+            if box_for_control is not None:
+                x, y, w_box, h_box = box_for_control
+                x1_draw, y1_draw, x2_draw, y2_draw = x, y, x + w_box, y + h_box
 
                 # Send overlay
                 h, w, _ = img.shape
-                norm_box = [float(c) for c in [x1/w, y1/h, x2/w, y2/h]]
+                norm_box = [
+                    float(x1_draw / w),
+                    float(y1_draw / h),
+                    float(x2_draw / w),
+                    float(y2_draw / h),
+                ]
                 overlay_data = [{"type": "rect", "coords": norm_box, "color": "lime"}]
                 self.send_overlay(json.dumps(overlay_data))
 
                 # Update controller
-                self.ctrl.update_target((x1, y1, w_box, h_box), img.shape[:2])
+                self.ctrl.update_target((x, y, w_box, h_box), img.shape[:2])
                 yaw, pitch = self.ctrl.current_commands()
                 self.fc.set_axes(throttle=0, yaw=yaw / 100.0, pitch=pitch / 100.0, roll=0)
             else:
-                # No person detected
+                # No target available
                 self.fc.set_axes(throttle=0, yaw=0, pitch=0, roll=0)
                 self.send_overlay(json.dumps([]))
