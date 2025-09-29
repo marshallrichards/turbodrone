@@ -15,7 +15,11 @@ class FollowController:
                  max_box_width: float | None = None,
                  invert_yaw: bool = False,
                  max_yaw_rate: float = 80.0,    # max change per second in percentage points
-                 max_pitch_rate: float = 60.0): # max change per second in percentage points
+                 max_pitch_rate: float = 60.0,
+                 yaw_exp: float = 1.0,
+                 pitch_exp: float = 1.0,
+                 max_yaw_cmd: float = 100.0,
+                 max_pitch_cmd: float = 100.0): # max change per second in percentage points
         self.fc = fc
 
         # --- Control gains ---
@@ -29,6 +33,10 @@ class FollowController:
         self.invert_yaw = invert_yaw
         self.max_yaw_rate = max_yaw_rate
         self.max_pitch_rate = max_pitch_rate
+        self.yaw_exp = max(0.5, float(yaw_exp))
+        self.pitch_exp = max(0.5, float(pitch_exp))
+        self.max_yaw_cmd = max(5.0, float(max_yaw_cmd))
+        self.max_pitch_cmd = max(5.0, float(max_pitch_cmd))
         
         # --- Deadzones to prevent oscillation ---
         self.yaw_deadzone = yaw_deadzone
@@ -73,7 +81,9 @@ class FollowController:
             # Default: positive error (right of centre) → yaw right (positive)
             # If invert_yaw is True, flip the sign.
             sign = -1 if self.invert_yaw else 1
-            yaw_target = sign * self.p_gain_yaw * yaw_error * 100
+            # Non-linear scaling to reduce overshoot near centre (exp > 1.0 reduces small errors)
+            yaw_error_adj = (abs(yaw_error) ** self.yaw_exp) * (1 if yaw_error >= 0 else -1)
+            yaw_target = sign * self.p_gain_yaw * yaw_error_adj * 100
 
         # --- Pitch control (distance management) ---
         pitch_target = 0.0
@@ -84,12 +94,13 @@ class FollowController:
                 # error is distance to min bound
                 pitch_error = self.min_box_width - self.box_width
                 if pitch_error > self.pitch_deadzone:
-                    pitch_target = +self.p_gain_pitch * pitch_error * 100
+                    # Non-linear scaling to soften corrections near threshold
+                    pitch_target = +self.p_gain_pitch * (pitch_error ** self.pitch_exp) * 100
             elif self.box_width > self.max_box_width:
                 # Too close: move backward (negative pitch)
                 pitch_error = self.box_width - self.max_box_width
                 if pitch_error > self.pitch_deadzone:
-                    pitch_target = -self.p_gain_pitch * pitch_error * 100
+                    pitch_target = -self.p_gain_pitch * (pitch_error ** self.pitch_exp) * 100
             else:
                 pitch_target = 0
         else:
@@ -98,10 +109,11 @@ class FollowController:
             if abs(pitch_error) > self.pitch_deadzone:
                 # If the box is too big (error > 0), we need to move backward (negative pitch).
                 # If the box is too small (error < 0), we need to move forward (positive pitch).
-                pitch_target = -self.p_gain_pitch * pitch_error * 100
-        # Clamp targets
-        yaw_target = max(-100, min(100, yaw_target))
-        pitch_target = max(-100, min(100, pitch_target))
+                pitch_sign = -1 if pitch_error > 0 else +1
+                pitch_target = pitch_sign * self.p_gain_pitch * (abs(pitch_error) ** self.pitch_exp) * 100
+        # Clamp targets to global and per-axis maxima
+        yaw_target = max(-self.max_yaw_cmd, min(self.max_yaw_cmd, yaw_target))
+        pitch_target = max(-self.max_pitch_cmd, min(self.max_pitch_cmd, pitch_target))
 
         # Slew-rate limiting toward targets
         now = time.time()

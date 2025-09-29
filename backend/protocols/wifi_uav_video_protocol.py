@@ -28,8 +28,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
     REQUEST_A_OFFSETS = (12, 13)          # two-byte LE frame counter
     REQUEST_B_OFFSETS = (12, 13, 88, 89, 107, 108)
 
-    FRAME_TIMEOUT = 0.10          # 150 ms without a full frame → retry
-    MAX_RETRIES = 2              # after this we skip the frame
+    FRAME_TIMEOUT = 0.08          # 80 ms without a full frame → retry sooner
+    MAX_RETRIES = 3              # allow one more retry for first-frame reliability
     WATCHDOG_SLEEP = 0.05          # 50 ms between watchdog checks
 
     # ------------------------------------------------------------------ #
@@ -72,6 +72,10 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         # Kick-off the stream and ask for the first frame
         self.send_start_command()
         self._send_frame_request(0) # Request frame 0 to get frame 1
+        # During warmup, resend until we see the first frame
+        self._first_frame = True
+        self._warmup_thread = threading.Thread(target=self._warmup_loop, daemon=True, name="Warmup")
+        self._warmup_thread.start()
 
         # Watchdog for per-frame timeouts
         self._running = True
@@ -171,6 +175,17 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
     # ------------------------------------------------------------------ #
     # helpers
     # ------------------------------------------------------------------ #
+    def _warmup_loop(self) -> None:
+        """During warmup, periodically resend START_STREAM + frame request
+        until the first frame is observed, then exit."""
+        while getattr(self, "_first_frame", False):
+            try:
+                self.send_start_command()
+                # Ask for the previous frame id; the drone will respond with next
+                self._send_frame_request((self._current_fid - 1) & 0xFFFF)
+            except Exception:
+                pass
+            time.sleep(0.2)
     def _send_frame_request(self, frame_id: int) -> None:
         lo, hi = frame_id & 0xFF, (frame_id >> 8) & 0xFF
 
@@ -252,7 +267,11 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
 
     def get_frame(self, timeout: float = 1.0) -> Optional[VideoFrame]:
         try:
-            return self._frame_q.get(timeout=timeout)
+            frame = self._frame_q.get(timeout=timeout)
+            # mark warmup complete on first delivered frame
+            if getattr(self, "_first_frame", False):
+                self._first_frame = False
+            return frame
         except queue.Empty:
             return None
 

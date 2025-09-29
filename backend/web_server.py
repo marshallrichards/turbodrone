@@ -81,6 +81,13 @@ async def lifespan(app: FastAPI):
 
         model = S2xRcModel()
         rc_proto = S2xRCProtocolAdapter(drone_ip, ctrl_port)
+        # Optional remap via env: some S2x variants swap yaw and roll
+        try:
+            rc_proto.swap_yaw_roll = os.getenv("S2X_SWAP_YAW_ROLL", "false").lower() in ("1", "true", "yes", "on")
+            if rc_proto.swap_yaw_roll:
+                print("[main] S2X swap_yaw_roll enabled")
+        except Exception:
+            pass
         video_adapter_cls = S2xVideoProtocolAdapter
         video_adapter_args = {
             "drone_ip": drone_ip,
@@ -250,22 +257,32 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             msg_type = data.get("type")
             if msg_type == "axes":
                 mode = data.get("mode", "abs")
-                # Switch strategy based on mode (treat "mouse" as absolute)
-                try:
-                    if mode in ("abs", "mouse"):
-                        if not isinstance(flight_controller.model.strategy, DirectStrategy):
-                            flight_controller.model.set_strategy(DirectStrategy())
-                    else:
-                        if not isinstance(flight_controller.model.strategy, IncrementalStrategy):
-                            flight_controller.model.set_strategy(IncrementalStrategy())
-                except Exception:
-                    pass
+
+                # If any plugin is running, do NOT flip strategy; give plugin priority for yaw/pitch.
+                plugin_running = bool(plugin_manager and plugin_manager.running())
+
+                if not plugin_running:
+                    # Switch strategy based on mode (treat "mouse" as absolute)
+                    try:
+                        if mode in ("abs", "mouse"):
+                            if not isinstance(flight_controller.model.strategy, DirectStrategy):
+                                flight_controller.model.set_strategy(DirectStrategy())
+                        else:
+                            if not isinstance(flight_controller.model.strategy, IncrementalStrategy):
+                                flight_controller.model.set_strategy(IncrementalStrategy())
+                    except Exception:
+                        pass
 
                 throttle = float(data.get("throttle", 0))
                 yaw      = float(data.get("yaw", 0))
                 pitch    = float(data.get("pitch", 0))
                 roll     = float(data.get("roll", 0))
-                flight_controller.set_axes_from("frontend", throttle, yaw, pitch, roll)
+
+                if plugin_running:
+                    # Let plugins own yaw/pitch; still allow throttle/roll from UI
+                    flight_controller.set_axes_from("frontend", throttle, 0.0, 0.0, roll)
+                else:
+                    flight_controller.set_axes_from("frontend", throttle, yaw, pitch, roll)
             elif msg_type == "set_profile":
                 try:
                     flight_controller.model.set_profile(data.get("name", "normal"))
@@ -327,28 +344,45 @@ def _frame_pump_worker(
     global video_keepalive
     if video_keepalive:
         video_keepalive.stop()
-    
-    video_keepalive = VideoKeepAlive(raw_q)
+
+    # Wait for the very first frame before starting keepalive, to avoid
+    # prematurely closing the MJPEG stream during initial connection.
+    first_frame_seen = False
+    while not stop_event.is_set() and not first_frame_seen:
+        try:
+            frame = raw_q.get(timeout=5.0)
+            if frame:
+                first_frame_seen = True
+                # Send to MJPEG/overlay pipelines immediately
+                try:
+                    FRAME_Q.put_nowait(frame.data)
+                except asyncio.QueueFull:
+                    pass
+                try:
+                    plugin_q.put_nowait(frame)
+                except queue.Full:
+                    pass
+                break
+        except queue.Empty:
+            # keep waiting for initial frame without killing the stream
+            continue
+
+    # Start keepalive after we confirmed frames are flowing
+    video_keepalive = VideoKeepAlive(raw_q, timeout=3)
     video_keepalive.start()
 
     while not stop_event.is_set():
         try:
             frame = raw_q.get(timeout=1.0)
             if frame:
-                # Put to MJPEG stream
                 try:
-                    # Non-blocking put, or drop if the queue is full
                     FRAME_Q.put_nowait(frame.data)
                 except asyncio.QueueFull:
-                    # This is okay, it means the client is not consuming frames fast enough
                     pass
-                
-                # Put to plugin manager
                 try:
                     plugin_q.put_nowait(frame)
                 except queue.Full:
                     pass
-
         except queue.Empty:
             continue
 

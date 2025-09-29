@@ -75,15 +75,22 @@ class FollowService(Plugin):
 
         # Gains and distance band
         # Slightly lower default gains to reduce overshoot
-        p_gain_yaw = float(os.getenv("FOLLOW_P_GAIN_YAW", "1.0"))
-        p_gain_pitch = float(os.getenv("FOLLOW_P_GAIN_PITCH", "0.9"))
+        p_gain_yaw = float(os.getenv("FOLLOW_P_GAIN_YAW", "1.4"))
+        p_gain_pitch = float(os.getenv("FOLLOW_P_GAIN_PITCH", "3.0"))
         pitch_deadzone = float(os.getenv("FOLLOW_PITCH_DEADZONE", "0.03"))
         # Band defined as min/max fraction of frame width
-        min_box_width = float(os.getenv("FOLLOW_MIN_BOX_WIDTH", "0.30"))
-        max_box_width = float(os.getenv("FOLLOW_MAX_BOX_WIDTH", "0.70"))
+        min_box_width = float(os.getenv("FOLLOW_MIN_BOX_WIDTH", "0.35"))
+        max_box_width = float(os.getenv("FOLLOW_MAX_BOX_WIDTH", "0.80"))
         # Slew limits (percentage points per second)
-        max_yaw_rate = float(os.getenv("FOLLOW_MAX_YAW_RATE", "60.0"))
-        max_pitch_rate = float(os.getenv("FOLLOW_MAX_PITCH_RATE", "50.0"))
+        max_yaw_rate = float(os.getenv("FOLLOW_MAX_YAW_RATE", "40.0"))
+        max_pitch_rate = float(os.getenv("FOLLOW_MAX_PITCH_RATE", "80.0"))
+        # Curve exponents (>1 softens small errors)
+        yaw_exp = float(os.getenv("FOLLOW_YAW_EXP", "1.5"))
+        pitch_exp = float(os.getenv("FOLLOW_PITCH_EXP", "1.0"))
+        # Hard caps on command magnitude (percentage points)
+        # max_yaw_cmd = float(os.getenv("FOLLOW_MAX_YAW_CMD", "12.0"))
+        max_yaw_cmd = float(os.getenv("FOLLOW_MAX_YAW_CMD", "45.0"))
+        max_pitch_cmd = float(os.getenv("FOLLOW_MAX_PITCH_CMD", "100.0"))
 
         invert_yaw = os.getenv("FOLLOW_INVERT_YAW", "false").lower() in ("1", "true", "yes", "on")
 
@@ -98,6 +105,10 @@ class FollowService(Plugin):
             invert_yaw=invert_yaw,
             max_yaw_rate=max_yaw_rate,
             max_pitch_rate=max_pitch_rate,
+            yaw_exp=yaw_exp,
+            pitch_exp=pitch_exp,
+            max_yaw_cmd=max_yaw_cmd,
+            max_pitch_cmd=max_pitch_cmd,
         )
 
         # Tracker state (for hybrid mode)
@@ -106,8 +117,14 @@ class FollowService(Plugin):
 
         # Switch RC model to DirectStrategy for responsive autonomous control
         self._prev_strategy = getattr(self.fc.model, "strategy", None)
+        self._prev_expo = getattr(self.fc.model, "expo_factor", None)
         try:
             self.fc.model.set_strategy(DirectStrategy())
+            # Disable expo so tiny commands aren't squashed by v^(1+expo)
+            try:
+                self.fc.model.expo_factor = 0.0
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -119,6 +136,8 @@ class FollowService(Plugin):
         try:
             if hasattr(self, "_prev_strategy") and self._prev_strategy is not None:
                 self.fc.model.set_strategy(self._prev_strategy)
+            if hasattr(self, "_prev_expo") and self._prev_expo is not None:
+                self.fc.model.expo_factor = self._prev_expo
         except Exception:
             pass
 
