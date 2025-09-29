@@ -73,9 +73,31 @@ class FollowService(Plugin):
         # Centering tolerance (± percentage of frame width around center)
         center_deadzone = float(os.getenv("FOLLOW_CENTER_DEADZONE", "0.05"))
 
+        # Gains and distance band
+        # Slightly lower default gains to reduce overshoot
+        p_gain_yaw = float(os.getenv("FOLLOW_P_GAIN_YAW", "1.0"))
+        p_gain_pitch = float(os.getenv("FOLLOW_P_GAIN_PITCH", "0.9"))
+        pitch_deadzone = float(os.getenv("FOLLOW_PITCH_DEADZONE", "0.03"))
+        # Band defined as min/max fraction of frame width
+        min_box_width = float(os.getenv("FOLLOW_MIN_BOX_WIDTH", "0.30"))
+        max_box_width = float(os.getenv("FOLLOW_MAX_BOX_WIDTH", "0.70"))
+        # Slew limits (percentage points per second)
+        max_yaw_rate = float(os.getenv("FOLLOW_MAX_YAW_RATE", "60.0"))
+        max_pitch_rate = float(os.getenv("FOLLOW_MAX_PITCH_RATE", "50.0"))
+
+        invert_yaw = os.getenv("FOLLOW_INVERT_YAW", "false").lower() in ("1", "true", "yes", "on")
+
         self.ctrl = FollowController(
             self.fc,
+            p_gain_yaw=p_gain_yaw,
+            p_gain_pitch=p_gain_pitch,
             yaw_deadzone=center_deadzone,
+            pitch_deadzone=pitch_deadzone,
+            min_box_width=min_box_width,
+            max_box_width=max_box_width,
+            invert_yaw=invert_yaw,
+            max_yaw_rate=max_yaw_rate,
+            max_pitch_rate=max_pitch_rate,
         )
 
         # Tracker state (for hybrid mode)
@@ -238,7 +260,18 @@ class FollowService(Plugin):
                 # Update controller
                 self.ctrl.update_target((x, y, w_box, h_box), img.shape[:2])
                 yaw, pitch = self.ctrl.current_commands()
-                self.fc.set_axes(throttle=0, yaw=yaw / 100.0, pitch=pitch / 100.0, roll=0)
+                self.fc.set_axes_from("follow", throttle=0, yaw=yaw / 100.0, pitch=pitch / 100.0, roll=0)
+
+                # Optional per-frame debug of commands issued
+                if os.getenv("FOLLOW_DEBUG_AXES", "false").lower() in ("1", "true", "yes", "on"):
+                    try:
+                        state = self.fc.model.get_control_state()
+                        print(
+                            f"[FollowService] cmd yaw={yaw:5.1f} pitch={pitch:5.1f} -> norm Y:{yaw/100.0:+.2f} P:{pitch/100.0:+.2f} | "
+                            f"raw Y:{state.get('yaw')} P:{state.get('pitch')}"
+                        )
+                    except Exception:
+                        pass
 
                 # Periodic centering diagnostics
                 now = time.time()

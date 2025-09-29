@@ -265,7 +265,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 yaw      = float(data.get("yaw", 0))
                 pitch    = float(data.get("pitch", 0))
                 roll     = float(data.get("roll", 0))
-                flight_controller.set_axes(throttle, yaw, pitch, roll)
+                flight_controller.set_axes_from("frontend", throttle, yaw, pitch, roll)
             elif msg_type == "set_profile":
                 try:
                     flight_controller.model.set_profile(data.get("name", "normal"))

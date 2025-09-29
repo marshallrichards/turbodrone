@@ -24,7 +24,12 @@ export function PluginControls() {
               <li key={name} className="flex items-center justify-between">
                 <span className="mr-4">{name}</span>
                 <button
-                  onClick={() => togglePlugin(name)}
+                  onClick={async () => {
+                    await togglePlugin(name);
+                    // Dispatch events so other hooks (e.g. controls) know without polling
+                    const running = runningPlugins.has(name);
+                    window.dispatchEvent(new CustomEvent(running ? 'plugin:stopped' : 'plugin:running'));
+                  }}
                   className={`px-4 py-1 rounded-full text-sm font-semibold transition-colors
                     ${isRunning
                       ? 'bg-green-500 hover:bg-green-600'

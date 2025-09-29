@@ -19,6 +19,11 @@ export function useControls() {
 
   /* ------- NEW: websocket ref & lifecycle ------- */
   const ws = useRef<WebSocket | null>(null);
+  
+  /* ------- Plugin state (event-driven) ------- */
+  const pluginRunningRef = useRef<boolean>(false);
+  const suppressNeutralTxRef = useRef<boolean>(true);     // gate 0,0,0,0 when plugin active
+  const stoppedPluginOnceRef = useRef<boolean>(false);    // rate-limit stop calls per burst
 
   // Open WS once on mount, close on unmount
   useEffect(() => {
@@ -26,6 +31,18 @@ export function useControls() {
     return () => {
       ws.current?.close();
       ws.current = null;
+    };
+  }, []);
+
+  // Listen for plugin start/stop events (dispatched from usePlugins and auto-stop)
+  useEffect(() => {
+    const onStart = () => { pluginRunningRef.current = true; };
+    const onStop  = () => { pluginRunningRef.current = false; stoppedPluginOnceRef.current = false; };
+    window.addEventListener('plugin:running', onStart as EventListener);
+    window.addEventListener('plugin:stopped', onStop as EventListener);
+    return () => {
+      window.removeEventListener('plugin:running', onStart as EventListener);
+      window.removeEventListener('plugin:stopped', onStop as EventListener);
     };
   }, []);
 
@@ -102,6 +119,9 @@ export function useControls() {
       if (!m) return;
       axesRef.current[m.axis] = m.dir;
       setAxes({ ...axesRef.current });
+
+      // If any plugin is running and user provides input → stop plugin once
+      maybeStopPluginOnUserInput();
     };
 
     const up = (e: KeyboardEvent) => {
@@ -145,6 +165,12 @@ export function useControls() {
         axesRef.current.yaw      = applyDeadzone(gp.axes[2]);     // right X
         axesRef.current.throttle = applyDeadzone(-gp.axes[3]);    // right Y (up == +1)
         setAxes({ ...axesRef.current });
+
+        // Stop plugin when the first non-zero user sticks are detected
+        if (Math.abs(axesRef.current.roll) > 0 || Math.abs(axesRef.current.pitch) > 0 ||
+            Math.abs(axesRef.current.yaw)  > 0 || Math.abs(axesRef.current.throttle) > 0) {
+          maybeStopPluginOnUserInput();
+        }
       }
       raf = requestAnimationFrame(poll);
     };
@@ -200,13 +226,18 @@ export function useControls() {
   /* ----------- network TX 30 Hz (treat mouse as "abs") ------- */
   useEffect(() => {
     const interval = setInterval(() => {
-      if (ws.current?.readyState === WebSocket.OPEN) {
-        ws.current.send(JSON.stringify({
-          type: "axes",
-          mode: modeRef.current,
-          ...axesRef.current,
-        }));
-      }
+      if (ws.current?.readyState !== WebSocket.OPEN) return;
+
+      // Suppress neutral transmissions when any plugin is running
+      const allZero = axesRef.current.throttle === 0 && axesRef.current.yaw === 0 &&
+                      axesRef.current.pitch === 0 && axesRef.current.roll === 0;
+      if (suppressNeutralTxRef.current && pluginRunningRef.current && allZero) return;
+
+      ws.current.send(JSON.stringify({
+        type: "axes",
+        mode: modeRef.current,
+        ...axesRef.current,
+      }));
     }, 1000 / 30);
     return () => clearInterval(interval);
   }, []);
@@ -218,6 +249,22 @@ export function useControls() {
     } else {
       console.warn("Cannot send command, WebSocket not open.");
     }
+  };
+
+  const maybeStopPluginOnUserInput = async () => {
+    if (!pluginRunningRef.current || stoppedPluginOnceRef.current) return;
+    try {
+      // Stop all running plugins for simplicity
+      const res = await fetch("http://localhost:8000/plugins");
+      if (!res.ok) return;
+      const data = await res.json();
+      const running: string[] = data?.running ?? [];
+      await Promise.all(running.map((name) => fetch(`http://localhost:8000/plugins/${name}/stop`, { method: 'POST' })));
+      stoppedPluginOnceRef.current = true;
+      pluginRunningRef.current = false;
+      // notify UI to flip OFF without polling
+      window.dispatchEvent(new CustomEvent('plugin:stopped'));
+    } catch {}
   };
 
   const takeOff = () => sendCommand("takeoff");

@@ -53,6 +53,7 @@ export function usePlugins() {
   // Fetch the initial state when the hook is first used
   useEffect(() => {
     fetchPluginState();
+    return () => {};
   }, [fetchPluginState]);
 
   return {
