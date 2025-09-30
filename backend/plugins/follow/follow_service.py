@@ -57,6 +57,12 @@ class FollowService(Plugin):
         # Logging toggle for centering diagnostics
         self.LOG_ENABLED = os.getenv("FOLLOW_LOG_ENABLED", "true").lower() in ("1", "true", "yes", "on")
         self.LOG_INTERVAL = float(os.getenv("FOLLOW_LOG_INTERVAL", "2.0"))
+        
+        # Command persistence: continue last command for N frames after losing tracking
+        self.PERSIST_FRAMES = int(os.getenv("FOLLOW_PERSIST_FRAMES", "5"))  # ~0.5s at 20fps
+        self._frames_since_detection = 0
+        self._last_yaw_cmd = 0.0
+        self._last_pitch_cmd = 0.0
 
         # Resolve YOLO weights path robustly: env override → file-relative default → name fallback
         weights_env = os.getenv("YOLO_WEIGHTS")
@@ -71,28 +77,43 @@ class FollowService(Plugin):
         self.model = YOLO(weights_path)
 
         # Centering tolerance (± percentage of frame width around center)
-        center_deadzone = float(os.getenv("FOLLOW_CENTER_DEADZONE", "0.05"))
+        # Large deadzone needed for S2X to prevent yaw overshoot due to drone momentum
+        center_deadzone = float(os.getenv("FOLLOW_CENTER_DEADZONE", "0.15"))
 
         # Gains and distance band
-        # Conservative defaults that work well with DirectStrategy
-        p_gain_yaw = float(os.getenv("FOLLOW_P_GAIN_YAW", "1.2"))
-        p_gain_pitch = float(os.getenv("FOLLOW_P_GAIN_PITCH", "2.0"))
-        pitch_deadzone = float(os.getenv("FOLLOW_PITCH_DEADZONE", "0.03"))
-        # Band defined as min/max fraction of frame width (safer distance range)
-        min_box_width = float(os.getenv("FOLLOW_MIN_BOX_WIDTH", "0.40"))
-        max_box_width = float(os.getenv("FOLLOW_MAX_BOX_WIDTH", "0.65"))
-        # Slew limits (percentage points per second) - MUCH FASTER for responsiveness
-        # Previous values (40/80) were too slow, causing sluggish tracking
-        max_yaw_rate = float(os.getenv("FOLLOW_MAX_YAW_RATE", "200.0"))
-        max_pitch_rate = float(os.getenv("FOLLOW_MAX_PITCH_RATE", "200.0"))
-        # Curve exponents (>1 softens small errors, 1.0 is linear)
-        yaw_exp = float(os.getenv("FOLLOW_YAW_EXP", "1.2"))
-        pitch_exp = float(os.getenv("FOLLOW_PITCH_EXP", "1.0"))
-        # Hard caps on command magnitude (percentage points) - moderate limits
-        max_yaw_cmd = float(os.getenv("FOLLOW_MAX_YAW_CMD", "40.0"))
-        max_pitch_cmd = float(os.getenv("FOLLOW_MAX_PITCH_CMD", "50.0"))
+        # Tuned for DirectStrategy (direct stick mapping like trackpoint/gamepad)
+        # Higher gains needed since DirectStrategy maps directly to stick positions
+        # Yaw gain reduced for S2X which has significant momentum
+        p_gain_yaw = float(os.getenv("FOLLOW_P_GAIN_YAW", "1.3"))
+        # Pitch gain moderate - needs to be strong enough to approach target distance
+        # Lower than yaw due to S2X momentum, but high enough to move forward
+        p_gain_pitch = float(os.getenv("FOLLOW_P_GAIN_PITCH", "2.5"))
+        # Small pitch deadzone - let distance band do the work
+        pitch_deadzone = float(os.getenv("FOLLOW_PITCH_DEADZONE", "0.02"))
+        # User's desired distance: 30-80% of frame (closer than typical)
+        # Drone will approach slowly and hold within this zone
+        min_box_width = float(os.getenv("FOLLOW_MIN_BOX_WIDTH", "0.30"))
+        max_box_width = float(os.getenv("FOLLOW_MAX_BOX_WIDTH", "0.80"))
+        # Reduced yaw slew rate to prevent overshoot
+        max_yaw_rate = float(os.getenv("FOLLOW_MAX_YAW_RATE", "100.0"))
+        # Moderate pitch slew rate - allow approach but prevent sudden jerks
+        max_pitch_rate = float(os.getenv("FOLLOW_MAX_PITCH_RATE", "110.0"))
+        # Higher yaw exponent for gentler response near center
+        yaw_exp = float(os.getenv("FOLLOW_YAW_EXP", "1.4"))
+        # Moderate pitch exponent - don't over-soften the approach
+        pitch_exp = float(os.getenv("FOLLOW_PITCH_EXP", "1.15"))
+        # Moderate caps on command magnitude
+        max_yaw_cmd = float(os.getenv("FOLLOW_MAX_YAW_CMD", "55.0"))
+        # Moderate pitch cap - high enough to approach, low enough to prevent lunging
+        max_pitch_cmd = float(os.getenv("FOLLOW_MAX_PITCH_CMD", "55.0"))
 
         invert_yaw = os.getenv("FOLLOW_INVERT_YAW", "false").lower() in ("1", "true", "yes", "on")
+        invert_pitch = os.getenv("FOLLOW_INVERT_PITCH", "false").lower() in ("1", "true", "yes", "on")
+        
+        # Temporal smoothing: 0.0 = no smoothing, 0.5 = moderate, 0.8 = heavy
+        # Higher value = less overshoot but slightly slower response
+        # Moderate smoothing - balance between approach speed and stability
+        smoothing_alpha = float(os.getenv("FOLLOW_SMOOTHING_ALPHA", "0.45"))
 
         self.ctrl = FollowController(
             self.fc,
@@ -103,39 +124,33 @@ class FollowService(Plugin):
             min_box_width=min_box_width,
             max_box_width=max_box_width,
             invert_yaw=invert_yaw,
+            invert_pitch=invert_pitch,
             max_yaw_rate=max_yaw_rate,
             max_pitch_rate=max_pitch_rate,
             yaw_exp=yaw_exp,
             pitch_exp=pitch_exp,
             max_yaw_cmd=max_yaw_cmd,
             max_pitch_cmd=max_pitch_cmd,
+            smoothing_alpha=smoothing_alpha,
         )
 
         # Tracker state (for hybrid mode)
         self._tracker = None
         self._tracked_box = None  # (x, y, w, h)
 
-        # Switch RC model strategy based on env var (default: direct)
-        # Options: "direct" (default) or "incremental"
-        # Direct: Maps commands directly to stick positions (better for precise control)
-        # Incremental: Uses acceleration/deceleration (may work better for some drones)
-        follow_strategy = os.getenv("FOLLOW_STRATEGY", "direct").lower()
+        # Set DirectStrategy for follow control
+        # Maps commands directly to stick positions (works well with S2X and WiFi UAV)
         self._prev_strategy = getattr(self.fc.model, "strategy", None)
         self._prev_expo = getattr(self.fc.model, "expo_factor", None)
         
         try:
-            if follow_strategy == "incremental":
-                from control.strategies import IncrementalStrategy
-                self.fc.model.set_strategy(IncrementalStrategy())
-                print(f"[FollowService] Using IncrementalStrategy (expo preserved)")
-            else:
-                self.fc.model.set_strategy(DirectStrategy())
-                # Disable expo so tiny commands aren't squashed by v^(1+expo)
-                try:
-                    self.fc.model.expo_factor = 0.0
-                    print(f"[FollowService] Using DirectStrategy with expo=0.0")
-                except Exception:
-                    pass
+            self.fc.model.set_strategy(DirectStrategy())
+            # Disable expo so tiny commands aren't squashed by v^(1+expo)
+            try:
+                self.fc.model.expo_factor = 0.0
+                print(f"[FollowService] Using DirectStrategy with expo=0.0")
+            except Exception:
+                pass
         except Exception as e:
             print(f"[FollowService] Warning: Failed to set strategy: {e}")
 
@@ -271,6 +286,9 @@ class FollowService(Plugin):
                     box_for_control = (x1, y1, (x2 - x1), (y2 - y1))
 
             if box_for_control is not None:
+                # Fresh detection - reset persistence counter
+                self._frames_since_detection = 0
+                
                 x, y, w_box, h_box = box_for_control
                 x1_draw, y1_draw, x2_draw, y2_draw = x, y, x + w_box, y + h_box
 
@@ -290,7 +308,12 @@ class FollowService(Plugin):
                 # Update controller
                 self.ctrl.update_target((x, y, w_box, h_box), img.shape[:2])
                 yaw, pitch = self.ctrl.current_commands()
-                self.fc.set_axes_from("follow", throttle=0, yaw=yaw / 100.0, pitch=pitch / 100.0, roll=0)
+                
+                # Store last valid commands
+                self._last_yaw_cmd = yaw / 100.0
+                self._last_pitch_cmd = pitch / 100.0
+                
+                self.fc.set_axes_from("follow", throttle=0, yaw=self._last_yaw_cmd, pitch=self._last_pitch_cmd, roll=0)
 
                 # Optional per-frame debug of commands issued
                 if os.getenv("FOLLOW_DEBUG_AXES", "false").lower() in ("1", "true", "yes", "on"):
@@ -316,8 +339,26 @@ class FollowService(Plugin):
                     )
                     last_log_time = now
             else:
-                # No target available
-                self.fc.set_axes(throttle=0, yaw=0, pitch=0, roll=0)
+                # No detection this frame - use command persistence
+                self._frames_since_detection += 1
+                
+                if self._frames_since_detection <= self.PERSIST_FRAMES:
+                    # Continue with last known commands (gradually decay to zero)
+                    decay_factor = 1.0 - (self._frames_since_detection / float(self.PERSIST_FRAMES))
+                    yaw_persist = self._last_yaw_cmd * decay_factor
+                    pitch_persist = self._last_pitch_cmd * decay_factor
+                    
+                    self.fc.set_axes_from("follow", throttle=0, yaw=yaw_persist, pitch=pitch_persist, roll=0)
+                    
+                    if os.getenv("FOLLOW_DEBUG_PERSIST", "false").lower() in ("1", "true", "yes", "on"):
+                        print(f"[FollowService] PERSIST frame {self._frames_since_detection}/{self.PERSIST_FRAMES}: "
+                              f"yaw={yaw_persist:+.2f}, pitch={pitch_persist:+.2f} (decay={decay_factor:.2f})")
+                else:
+                    # Exceeded persistence limit - send zeros
+                    self.fc.set_axes(throttle=0, yaw=0, pitch=0, roll=0)
+                    if os.getenv("FOLLOW_DEBUG_PERSIST", "false").lower() in ("1", "true", "yes", "on"):
+                        print(f"[FollowService] Lost tracking for {self._frames_since_detection} frames - sending zeros")
+                
                 if self.DEBUG_OVERLAY:
                     debug_overlay = [{"type": "rect", "coords": [0.0, 0.0, 1.0, 1.0], "color": self.DEBUG_BORDER_COLOR}]
                     self.send_overlay(json.dumps(debug_overlay))

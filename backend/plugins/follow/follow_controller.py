@@ -14,12 +14,14 @@ class FollowController:
                  min_box_width: float | None = None,
                  max_box_width: float | None = None,
                  invert_yaw: bool = False,
+                 invert_pitch: bool = False,
                  max_yaw_rate: float = 80.0,    # max change per second in percentage points
                  max_pitch_rate: float = 60.0,
                  yaw_exp: float = 1.0,
                  pitch_exp: float = 1.0,
                  max_yaw_cmd: float = 100.0,
-                 max_pitch_cmd: float = 100.0): # max change per second in percentage points
+                 max_pitch_cmd: float = 100.0,
+                 smoothing_alpha: float = 0.3): # max change per second in percentage points
         self.fc = fc
 
         # --- Control gains ---
@@ -31,6 +33,7 @@ class FollowController:
         self.min_box_width = min_box_width
         self.max_box_width = max_box_width
         self.invert_yaw = invert_yaw
+        self.invert_pitch = invert_pitch
         self.max_yaw_rate = max_yaw_rate
         self.max_pitch_rate = max_pitch_rate
         self.yaw_exp = max(0.5, float(yaw_exp))
@@ -42,9 +45,16 @@ class FollowController:
         self.yaw_deadzone = yaw_deadzone
         self.pitch_deadzone = pitch_deadzone
 
+        # --- Temporal smoothing (exponential moving average) ---
+        # Alpha: 0.0 = no smoothing (instant), 1.0 = full smoothing (frozen)
+        # 0.3 means new value gets 70% weight, old gets 30%
+        self.smoothing_alpha = max(0.0, min(1.0, smoothing_alpha))
+        self.smoothed_center_x = None  # Will be initialized on first update
+        self.smoothed_width = None
+
         # --- State updated by the tracker ---
-        self.box_center_x = 0.5 # Normalized
-        self.box_width = 0.0    # Normalized
+        self.box_center_x = 0.5 # Normalized (raw, unsmoothed)
+        self.box_width = 0.0    # Normalized (raw, unsmoothed)
         self.last_update = time.time()
         self.last_cmd_time = time.time()
 
@@ -61,9 +71,25 @@ class FollowController:
         frame_h, frame_w = frame_shape
         box_x, box_y, box_w, box_h = box
 
-        # Normalize and store the center and width of the bounding box
-        self.box_center_x = (box_x + box_w / 2) / frame_w
-        self.box_width = box_w / frame_w
+        # Normalize the center and width of the bounding box
+        raw_center_x = (box_x + box_w / 2) / frame_w
+        raw_width = box_w / frame_w
+        
+        # Apply exponential moving average for temporal smoothing
+        if self.smoothed_center_x is None:
+            # First measurement - initialize with raw values
+            self.smoothed_center_x = raw_center_x
+            self.smoothed_width = raw_width
+        else:
+            # EMA: new_smooth = alpha * old_smooth + (1 - alpha) * new_raw
+            self.smoothed_center_x = (self.smoothing_alpha * self.smoothed_center_x + 
+                                     (1.0 - self.smoothing_alpha) * raw_center_x)
+            self.smoothed_width = (self.smoothing_alpha * self.smoothed_width + 
+                                  (1.0 - self.smoothing_alpha) * raw_width)
+        
+        # Store both raw and smoothed values
+        self.box_center_x = raw_center_x
+        self.box_width = raw_width
         
         self.last_update = time.time()
 
@@ -74,9 +100,13 @@ class FollowController:
         - Pitch keeps the target at a stable distance (by controlling box width).
         """
         
+        # Use smoothed values for control (if available)
+        center_x = self.smoothed_center_x if self.smoothed_center_x is not None else self.box_center_x
+        width = self.smoothed_width if self.smoothed_width is not None else self.box_width
+        
         # --- Yaw control (horizontal centering) ---
         yaw_target = 0.0
-        yaw_error = self.box_center_x - 0.5
+        yaw_error = center_x - 0.5
         if abs(yaw_error) > self.yaw_deadzone:
             # Default: positive error (right of centre) → yaw right (positive)
             # If invert_yaw is True, flip the sign.
@@ -89,27 +119,31 @@ class FollowController:
         pitch_target = 0.0
         # Band control: if min/max provided, steer to bring width back into the band
         if self.min_box_width is not None and self.max_box_width is not None:
-            if self.box_width < self.min_box_width:
-                # Too far: move forward (positive pitch)
+            if width < self.min_box_width:
+                # Too far: move forward (positive pitch by default)
                 # error is distance to min bound
-                pitch_error = self.min_box_width - self.box_width
+                pitch_error = self.min_box_width - width
                 if pitch_error > self.pitch_deadzone:
                     # Non-linear scaling to soften corrections near threshold
-                    pitch_target = +self.p_gain_pitch * (pitch_error ** self.pitch_exp) * 100
-            elif self.box_width > self.max_box_width:
-                # Too close: move backward (negative pitch)
-                pitch_error = self.box_width - self.max_box_width
+                    pitch_direction = +1 if not self.invert_pitch else -1
+                    pitch_target = pitch_direction * self.p_gain_pitch * (pitch_error ** self.pitch_exp) * 100
+            elif width > self.max_box_width:
+                # Too close: move backward (negative pitch by default)
+                pitch_error = width - self.max_box_width
                 if pitch_error > self.pitch_deadzone:
-                    pitch_target = -self.p_gain_pitch * (pitch_error ** self.pitch_exp) * 100
+                    pitch_direction = -1 if not self.invert_pitch else +1
+                    pitch_target = pitch_direction * self.p_gain_pitch * (pitch_error ** self.pitch_exp) * 100
             else:
                 pitch_target = 0
         else:
             # Single target width control
-            pitch_error = self.box_width - self.target_box_width
+            pitch_error = width - self.target_box_width
             if abs(pitch_error) > self.pitch_deadzone:
                 # If the box is too big (error > 0), we need to move backward (negative pitch).
                 # If the box is too small (error < 0), we need to move forward (positive pitch).
                 pitch_sign = -1 if pitch_error > 0 else +1
+                if self.invert_pitch:
+                    pitch_sign *= -1
                 pitch_target = pitch_sign * self.p_gain_pitch * (abs(pitch_error) ** self.pitch_exp) * 100
         # Clamp targets to global and per-axis maxima
         yaw_target = max(-self.max_yaw_cmd, min(self.max_yaw_cmd, yaw_target))
