@@ -74,23 +74,23 @@ class FollowService(Plugin):
         center_deadzone = float(os.getenv("FOLLOW_CENTER_DEADZONE", "0.05"))
 
         # Gains and distance band
-        # Slightly lower default gains to reduce overshoot
-        p_gain_yaw = float(os.getenv("FOLLOW_P_GAIN_YAW", "1.4"))
-        p_gain_pitch = float(os.getenv("FOLLOW_P_GAIN_PITCH", "3.0"))
+        # Conservative defaults that work well with DirectStrategy
+        p_gain_yaw = float(os.getenv("FOLLOW_P_GAIN_YAW", "1.2"))
+        p_gain_pitch = float(os.getenv("FOLLOW_P_GAIN_PITCH", "2.0"))
         pitch_deadzone = float(os.getenv("FOLLOW_PITCH_DEADZONE", "0.03"))
-        # Band defined as min/max fraction of frame width
-        min_box_width = float(os.getenv("FOLLOW_MIN_BOX_WIDTH", "0.35"))
-        max_box_width = float(os.getenv("FOLLOW_MAX_BOX_WIDTH", "0.80"))
-        # Slew limits (percentage points per second)
-        max_yaw_rate = float(os.getenv("FOLLOW_MAX_YAW_RATE", "40.0"))
-        max_pitch_rate = float(os.getenv("FOLLOW_MAX_PITCH_RATE", "80.0"))
-        # Curve exponents (>1 softens small errors)
-        yaw_exp = float(os.getenv("FOLLOW_YAW_EXP", "1.5"))
+        # Band defined as min/max fraction of frame width (safer distance range)
+        min_box_width = float(os.getenv("FOLLOW_MIN_BOX_WIDTH", "0.40"))
+        max_box_width = float(os.getenv("FOLLOW_MAX_BOX_WIDTH", "0.65"))
+        # Slew limits (percentage points per second) - MUCH FASTER for responsiveness
+        # Previous values (40/80) were too slow, causing sluggish tracking
+        max_yaw_rate = float(os.getenv("FOLLOW_MAX_YAW_RATE", "200.0"))
+        max_pitch_rate = float(os.getenv("FOLLOW_MAX_PITCH_RATE", "200.0"))
+        # Curve exponents (>1 softens small errors, 1.0 is linear)
+        yaw_exp = float(os.getenv("FOLLOW_YAW_EXP", "1.2"))
         pitch_exp = float(os.getenv("FOLLOW_PITCH_EXP", "1.0"))
-        # Hard caps on command magnitude (percentage points)
-        # max_yaw_cmd = float(os.getenv("FOLLOW_MAX_YAW_CMD", "12.0"))
-        max_yaw_cmd = float(os.getenv("FOLLOW_MAX_YAW_CMD", "45.0"))
-        max_pitch_cmd = float(os.getenv("FOLLOW_MAX_PITCH_CMD", "100.0"))
+        # Hard caps on command magnitude (percentage points) - moderate limits
+        max_yaw_cmd = float(os.getenv("FOLLOW_MAX_YAW_CMD", "40.0"))
+        max_pitch_cmd = float(os.getenv("FOLLOW_MAX_PITCH_CMD", "50.0"))
 
         invert_yaw = os.getenv("FOLLOW_INVERT_YAW", "false").lower() in ("1", "true", "yes", "on")
 
@@ -115,18 +115,29 @@ class FollowService(Plugin):
         self._tracker = None
         self._tracked_box = None  # (x, y, w, h)
 
-        # Switch RC model to DirectStrategy for responsive autonomous control
+        # Switch RC model strategy based on env var (default: direct)
+        # Options: "direct" (default) or "incremental"
+        # Direct: Maps commands directly to stick positions (better for precise control)
+        # Incremental: Uses acceleration/deceleration (may work better for some drones)
+        follow_strategy = os.getenv("FOLLOW_STRATEGY", "direct").lower()
         self._prev_strategy = getattr(self.fc.model, "strategy", None)
         self._prev_expo = getattr(self.fc.model, "expo_factor", None)
+        
         try:
-            self.fc.model.set_strategy(DirectStrategy())
-            # Disable expo so tiny commands aren't squashed by v^(1+expo)
-            try:
-                self.fc.model.expo_factor = 0.0
-            except Exception:
-                pass
-        except Exception:
-            pass
+            if follow_strategy == "incremental":
+                from control.strategies import IncrementalStrategy
+                self.fc.model.set_strategy(IncrementalStrategy())
+                print(f"[FollowService] Using IncrementalStrategy (expo preserved)")
+            else:
+                self.fc.model.set_strategy(DirectStrategy())
+                # Disable expo so tiny commands aren't squashed by v^(1+expo)
+                try:
+                    self.fc.model.expo_factor = 0.0
+                    print(f"[FollowService] Using DirectStrategy with expo=0.0")
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[FollowService] Warning: Failed to set strategy: {e}")
 
         self.loop_thread = threading.Thread(target=self._loop, daemon=True)
         self.loop_thread.start()

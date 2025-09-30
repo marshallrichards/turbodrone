@@ -258,10 +258,14 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             if msg_type == "axes":
                 mode = data.get("mode", "abs")
 
-                # If any plugin is running, do NOT flip strategy; give plugin priority for yaw/pitch.
+                # If any plugin is running, completely ignore frontend control commands
+                # Frontend should already be suppressing these, but this is a safety check
                 plugin_running = bool(plugin_manager and plugin_manager.running())
 
-                if not plugin_running:
+                if plugin_running:
+                    # Plugin has full control - don't process frontend axes at all
+                    pass
+                else:
                     # Switch strategy based on mode (treat "mouse" as absolute)
                     try:
                         if mode in ("abs", "mouse"):
@@ -273,15 +277,11 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     except Exception:
                         pass
 
-                throttle = float(data.get("throttle", 0))
-                yaw      = float(data.get("yaw", 0))
-                pitch    = float(data.get("pitch", 0))
-                roll     = float(data.get("roll", 0))
-
-                if plugin_running:
-                    # Let plugins own yaw/pitch; still allow throttle/roll from UI
-                    flight_controller.set_axes_from("frontend", throttle, 0.0, 0.0, roll)
-                else:
+                    throttle = float(data.get("throttle", 0))
+                    yaw      = float(data.get("yaw", 0))
+                    pitch    = float(data.get("pitch", 0))
+                    roll     = float(data.get("roll", 0))
+                    
                     flight_controller.set_axes_from("frontend", throttle, yaw, pitch, roll)
             elif msg_type == "set_profile":
                 try:

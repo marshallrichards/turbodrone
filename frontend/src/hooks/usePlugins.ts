@@ -56,6 +56,17 @@ export function usePlugins() {
     return () => {};
   }, [fetchPluginState]);
 
+  // Keep UI in sync when other parts of the app start/stop plugins
+  useEffect(() => {
+    const handler = () => { fetchPluginState(); };
+    window.addEventListener('plugin:running', handler as EventListener);
+    window.addEventListener('plugin:stopped', handler as EventListener);
+    return () => {
+      window.removeEventListener('plugin:running', handler as EventListener);
+      window.removeEventListener('plugin:stopped', handler as EventListener);
+    };
+  }, [fetchPluginState]);
+
   return {
     availablePlugins,
     runningPlugins,

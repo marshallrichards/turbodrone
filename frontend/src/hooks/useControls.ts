@@ -22,7 +22,6 @@ export function useControls() {
   
   /* ------- Plugin state (event-driven) ------- */
   const pluginRunningRef = useRef<boolean>(false);
-  const suppressNeutralTxRef = useRef<boolean>(true);     // gate 0,0,0,0 when plugin active
   const stoppedPluginOnceRef = useRef<boolean>(false);    // rate-limit stop calls per burst
 
   // Open WS once on mount, close on unmount
@@ -191,6 +190,11 @@ export function useControls() {
       axesRef.current.roll  = Math.max(-1, Math.min(1, axesRef.current.roll  +  e.movementX * sensitivity));
       axesRef.current.pitch = Math.max(-1, Math.min(1, axesRef.current.pitch - e.movementY * sensitivity));
       setAxes({ ...axesRef.current });
+      
+      // Stop plugin when user moves mouse/trackpoint
+      if (Math.abs(e.movementX) > 0 || Math.abs(e.movementY) > 0) {
+        maybeStopPluginOnUserInput();
+      }
     };
 
     /* gentle recentre so sticks don't stay deflected forever */
@@ -228,10 +232,9 @@ export function useControls() {
     const interval = setInterval(() => {
       if (ws.current?.readyState !== WebSocket.OPEN) return;
 
-      // Suppress neutral transmissions when any plugin is running
-      const allZero = axesRef.current.throttle === 0 && axesRef.current.yaw === 0 &&
-                      axesRef.current.pitch === 0 && axesRef.current.roll === 0;
-      if (suppressNeutralTxRef.current && pluginRunningRef.current && allZero) return;
+      // COMPLETELY suppress all transmissions when any plugin is running
+      // This prevents frontend from overwriting plugin commands
+      if (pluginRunningRef.current) return;
 
       ws.current.send(JSON.stringify({
         type: "axes",
@@ -264,7 +267,9 @@ export function useControls() {
       pluginRunningRef.current = false;
       // notify UI to flip OFF without polling
       window.dispatchEvent(new CustomEvent('plugin:stopped'));
-    } catch {}
+    } catch {
+      // Ignore errors when stopping plugins (fire-and-forget)
+    }
   };
 
   const takeOff = () => sendCommand("takeoff");
