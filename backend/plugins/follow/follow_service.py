@@ -76,62 +76,29 @@ class FollowService(Plugin):
 
         self.model = YOLO(weights_path)
 
-        # Centering tolerance (± percentage of frame width around center)
-        # Large deadzone needed for S2X to prevent yaw overshoot due to drone momentum
+        # Centering tolerance and distance band
         center_deadzone = float(os.getenv("FOLLOW_CENTER_DEADZONE", "0.15"))
-
-        # Gains and distance band
-        # Tuned for DirectStrategy (direct stick mapping like trackpoint/gamepad)
-        # Higher gains needed since DirectStrategy maps directly to stick positions
-        # Yaw gain reduced for S2X which has significant momentum
-        p_gain_yaw = float(os.getenv("FOLLOW_P_GAIN_YAW", "1.3"))
-        # Pitch gain moderate - needs to be strong enough to approach target distance
-        # Lower than yaw due to S2X momentum, but high enough to move forward
-        p_gain_pitch = float(os.getenv("FOLLOW_P_GAIN_PITCH", "2.5"))
-        # Small pitch deadzone - let distance band do the work
         pitch_deadzone = float(os.getenv("FOLLOW_PITCH_DEADZONE", "0.02"))
-        # User's desired distance: 30-80% of frame (closer than typical)
-        # Drone will approach slowly and hold within this zone
         min_box_width = float(os.getenv("FOLLOW_MIN_BOX_WIDTH", "0.30"))
         max_box_width = float(os.getenv("FOLLOW_MAX_BOX_WIDTH", "0.80"))
-        # Reduced yaw slew rate to prevent overshoot
-        max_yaw_rate = float(os.getenv("FOLLOW_MAX_YAW_RATE", "100.0"))
-        # Moderate pitch slew rate - allow approach but prevent sudden jerks
-        max_pitch_rate = float(os.getenv("FOLLOW_MAX_PITCH_RATE", "110.0"))
-        # Higher yaw exponent for gentler response near center
-        yaw_exp = float(os.getenv("FOLLOW_YAW_EXP", "1.4"))
-        # Moderate pitch exponent - don't over-soften the approach
-        pitch_exp = float(os.getenv("FOLLOW_PITCH_EXP", "1.15"))
-        # Moderate caps on command magnitude
-        max_yaw_cmd = float(os.getenv("FOLLOW_MAX_YAW_CMD", "55.0"))
-        # Moderate pitch cap - high enough to approach, low enough to prevent lunging
-        max_pitch_cmd = float(os.getenv("FOLLOW_MAX_PITCH_CMD", "55.0"))
 
         invert_yaw = os.getenv("FOLLOW_INVERT_YAW", "false").lower() in ("1", "true", "yes", "on")
         invert_pitch = os.getenv("FOLLOW_INVERT_PITCH", "false").lower() in ("1", "true", "yes", "on")
-        
-        # Temporal smoothing: 0.0 = no smoothing, 0.5 = moderate, 0.8 = heavy
-        # Higher value = less overshoot but slightly slower response
-        # Moderate smoothing - balance between approach speed and stability
-        smoothing_alpha = float(os.getenv("FOLLOW_SMOOTHING_ALPHA", "0.45"))
+
+        # Constant-rate command magnitudes (percentage points)
+        const_yaw_cmd = float(os.getenv("FOLLOW_CONST_YAW_CMD", "20.0"))
+        const_pitch_cmd = float(os.getenv("FOLLOW_CONST_PITCH_CMD", "20.0"))
 
         self.ctrl = FollowController(
             self.fc,
-            p_gain_yaw=p_gain_yaw,
-            p_gain_pitch=p_gain_pitch,
             yaw_deadzone=center_deadzone,
             pitch_deadzone=pitch_deadzone,
             min_box_width=min_box_width,
             max_box_width=max_box_width,
             invert_yaw=invert_yaw,
             invert_pitch=invert_pitch,
-            max_yaw_rate=max_yaw_rate,
-            max_pitch_rate=max_pitch_rate,
-            yaw_exp=yaw_exp,
-            pitch_exp=pitch_exp,
-            max_yaw_cmd=max_yaw_cmd,
-            max_pitch_cmd=max_pitch_cmd,
-            smoothing_alpha=smoothing_alpha,
+            const_yaw_cmd=const_yaw_cmd,
+            const_pitch_cmd=const_pitch_cmd,
         )
 
         # Tracker state (for hybrid mode)
