@@ -12,8 +12,8 @@ class FollowController:
                  max_box_width: float | None = None,
                  invert_yaw: bool = False,
                  invert_pitch: bool = False,
-                 const_yaw_cmd: float = 20.0,
-                 const_pitch_cmd: float = 20.0):
+                 const_yaw_cmd: float = 60.0,
+                 const_pitch_cmd: float = 60.0):
         self.fc = fc
 
         # --- Deadzones and band ---

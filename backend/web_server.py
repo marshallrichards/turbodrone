@@ -139,6 +139,17 @@ async def lifespan(app: FastAPI):
     await asyncio.sleep(1)
 
     # 2. RC / flight
+    # Optional: enable low-level RC packet debug via env
+    try:
+        if os.getenv("RC_DEBUG_PACKETS", "false").lower() in ("1", "true", "yes", "on"):
+            try:
+                rc_proto.toggle_debug()
+                print("[main] RC packet debug: ON")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     flight_controller = FlightController(model, rc_proto)
     flight_controller.start()
 
