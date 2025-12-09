@@ -282,3 +282,11 @@ class VideoKeepAlive:
             self._send_start_cmd()
             # wait() lets us wake up immediately on stop()
             self._stop.wait(self._interval)
+
+def main():
+    """Starts the web server using uvicorn."""
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+if __name__ == "__main__":
+    main()
