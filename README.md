@@ -11,13 +11,14 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
 
     | Brand      | Model Number(s)    | Compatibility | Purchase Link                                               | Notes |
     |------------|-----------------|---------------|-------------------------------------------------------------|-------|
-    | Karuisrc | K417 | Tested | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | My favorite right now. Only one on the list with brushless motors! Build quality is fantastic. |
-    | Loiley     | S29             | Tested    | [Amazon](https://www.amazon.com/Beginners-Altitude-Gestures-Adjustable-Batteries/dp/B0CFDVKJKC)                  | Best build quality, has servo for tilting camera(_not implemented in API yet_)|
+    | Karuisrc | K417 | Tested | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | My favorite right now. Only one currently supported that has brushless motors! Build quality is fantastic. |
+    | Laheyi   | M10 | TODO |  [Amazon](https://www.amazon.com/dp/B0FYPY4JL1) | Another brushless motor option. In-process of being supported. |
+    | Loiley     | S29             | Tested    | Can't find link anymore | Great build quality, has servo for tilting camera(_not implemented in API yet_)|
     | Hiturbo    | S20             | Tested    | [Amazon](https://www.amazon.com/dp/B0BBVZ849G), [Alternate Amazon Listing](https://www.amazon.com/Beginners-Foldable-Quadcopter-Gestures-Batteries/dp/B0D8LK1KJ3)                  | Original test platform, great build quality|
     | FlyVista | V88 | Tested | [Amazon](https://www.amazon.com/dp/B0D5CXY6X8) | |
-    | ? | D16/GT3/V66 | Tested | cheapest on [Aliexpress](https://www.aliexpress.us/item/3256808590663347.html), [Amazon](https://www.amazon.com/THOAML-Batteries-Altitude-Headless-360%C2%B0Flip/dp/B0F1D6F62J/) | 20% smaller DJI Neo clone. Only really good for indoor flight. 
+    | ? | D16/GT3/V66 | Tested | cheapest on [Aliexpress](https://www.aliexpress.us/item/3256808590663347.html), [Amazon](https://www.amazon.com/AUHIFVAX-Intelligent-Avoidance-Christmas-Thanksgiving/dp/B0FJRVH76T) | 20% smaller DJI Neo clone. Only really good for indoor flight. 
     | Several Brands | E58 | Tested | [Amazon](https://www.amazon.com/Foldable-Quadcopter-Beginners-Batteries-Waypoints/dp/B09KV8L7WN/) |  |
-    | Several Brands | E88/E88 Pro | Suspected | [Amazon](https://www.amazon.com/Foldable-Camera-Quadcopter-Altitude-Beginner/dp/B0DZCLFQXN) | |
+    | Several Brands | E88/E88 Pro | Suspected | [Amazon](https://www.amazon.com/Beginners-Foldable-Quadcopter-Real-Time-Rechargable/dp/B0FKNH6Q4T) | |
     | Several Brands | E99/E99 Pro | Suspected | [Amazon](https://www.amazon.com/LJN53-Foldable-Drone-Dual-Cameras/dp/B0DRH9C6RF) | |
     | Swifsen | A35 | Suspected | [Amazon](https://a.co/d/bqKvloz) | Very small "toy" drone|
     | Unknown | LSRC-S1S | Suspected | | mentioned in another reverse-engineering effort for the WiFi UAV app|
@@ -114,3 +115,4 @@ After that, you can work on an implementation that is compatible with the existi
 
 ## Experimental Support
 For drones and apps with limited support which are not yet fully integrated into Turbodrone, see the `experimental` directory.
+
