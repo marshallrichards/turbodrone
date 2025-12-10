@@ -1,81 +1,57 @@
- 
-
 class FollowController:
     """
-    Calculates drone movements to keep a target centered and at a stable distance.
+    Calculates yaw/pitch commands to keep a target centered and at a stable distance.
+    
+    Uses constant-rate (bang-bang) control: outputs fixed command values when
+    the target is outside the deadzone, zero when inside.
     """
 
-    def __init__(self, fc,
-                 yaw_deadzone=0.15,
-                 pitch_deadzone=0.02,
-                 min_box_width: float | None = None,
-                 max_box_width: float | None = None,
-                 invert_yaw: bool = False,
-                 invert_pitch: bool = False,
-                 const_yaw_cmd: float = 60.0,
-                 const_pitch_cmd: float = 60.0):
-        self.fc = fc
-
-        # --- Deadzones and band ---
+    def __init__(
+        self,
+        yaw_deadzone: float = 0.15,
+        pitch_deadzone: float = 0.02,
+        min_box_width: float = 0.30,
+        max_box_width: float = 0.80,
+        invert_yaw: bool = False,
+        invert_pitch: bool = False,
+        yaw_speed: float = 20.0,
+        pitch_speed: float = 20.0,
+    ):
         self.yaw_deadzone = yaw_deadzone
         self.pitch_deadzone = pitch_deadzone
         self.min_box_width = min_box_width
         self.max_box_width = max_box_width
         self.invert_yaw = invert_yaw
         self.invert_pitch = invert_pitch
+        self.yaw_speed = min(100.0, max(0.0, yaw_speed))
+        self.pitch_speed = min(100.0, max(0.0, pitch_speed))
 
-        # --- Constant-rate magnitudes (percentage points, 0..100) ---
-        self.const_yaw_cmd = max(0.0, min(100.0, float(const_yaw_cmd)))
-        self.const_pitch_cmd = max(0.0, min(100.0, float(const_pitch_cmd)))
-
-        # --- State ---
-        self.box_center_x = 0.5  # normalized
-        self.box_width = 0.0     # normalized
-        self.current_yaw_cmd = 0.0
-        self.current_pitch_cmd = 0.0
-
-    def update_target(self, box, frame_shape):
+    def compute(self, box_center_x: float, box_width: float) -> tuple[float, float]:
         """
-        Update the target's position and size from the tracker.
-        `box` is (x, y, w, h) in absolute pixel coordinates.
-        `frame_shape` is (height, width).
+        Compute yaw and pitch commands.
+        
+        Args:
+            box_center_x: Normalized x position of box center (0.0 = left, 1.0 = right)
+            box_width: Normalized width of box (0.0 to 1.0)
+        
+        Returns:
+            (yaw, pitch) commands in range -100 to 100
         """
-        frame_h, frame_w = frame_shape
-        box_x, box_y, box_w, box_h = box
-
-        # Normalize and store raw values
-        self.box_center_x = (box_x + box_w / 2) / frame_w
-        self.box_width = box_w / frame_w
-
-    def current_commands(self):
-        """
-        Returns constant-rate (yaw, pitch) corrections based on target offset and size.
-        """
-        center_x = self.box_center_x
-        width = self.box_width
-
-        # Yaw: fixed-magnitude correction outside horizontal deadzone
-        yaw_cmd = 0.0
-        yaw_error = center_x - 0.5
-        if abs(yaw_error) > self.yaw_deadzone:
-            base = self.const_yaw_cmd
-            yaw_cmd = (base if yaw_error > 0 else -base)
+        # Yaw: rotate to center the target horizontally
+        yaw = 0.0
+        error_x = box_center_x - 0.5
+        if abs(error_x) > self.yaw_deadzone:
+            yaw = self.yaw_speed if error_x > 0 else -self.yaw_speed
             if self.invert_yaw:
-                yaw_cmd = -yaw_cmd
+                yaw = -yaw
 
-        # Pitch: fixed-magnitude correction to keep width within band (if provided)
-        pitch_cmd = 0.0
-        if self.min_box_width is not None and self.max_box_width is not None:
-            if width < (self.min_box_width - self.pitch_deadzone):
-                pitch_cmd = self.const_pitch_cmd
-            elif width > (self.max_box_width + self.pitch_deadzone):
-                pitch_cmd = -self.const_pitch_cmd
-            else:
-                pitch_cmd = 0.0
-
+        # Pitch: move forward/backward to keep target at desired size
+        pitch = 0.0
+        if box_width < (self.min_box_width - self.pitch_deadzone):
+            pitch = self.pitch_speed  # too far, move forward
+        elif box_width > (self.max_box_width + self.pitch_deadzone):
+            pitch = -self.pitch_speed  # too close, move backward
         if self.invert_pitch:
-            pitch_cmd = -pitch_cmd
+            pitch = -pitch
 
-        self.current_yaw_cmd = max(-100.0, min(100.0, yaw_cmd))
-        self.current_pitch_cmd = max(-100.0, min(100.0, pitch_cmd))
-        return self.current_yaw_cmd, self.current_pitch_cmd
+        return yaw, pitch
