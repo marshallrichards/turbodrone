@@ -2,6 +2,7 @@ import importlib
 import inspect
 import pkgutil
 import queue
+import threading
 from typing import Dict, Iterator, Type
 from services.flight_controller import FlightController
 from .base import Plugin
@@ -16,6 +17,7 @@ class PluginManager:
         self._overlay_q = overlay_queue
         self._registry: Dict[str, Type[Plugin]] = {}
         self._pool: Dict[str, Plugin] = {}
+        self._frame_stop_events: Dict[str, threading.Event] = {}
         self._discover_plugins()
 
     def available(self) -> list[str]:
@@ -50,10 +52,22 @@ class PluginManager:
         print(f"[PluginManager] Starting plugin: {name}")
         cls = self._registry[name]
 
-        def frame_iterator():
-            while True:
-                # This will block until a frame is available in the queue
-                yield self._frames_q.get()
+        stop_event = threading.Event()
+        self._frame_stop_events[name] = stop_event
+
+        def frame_iterator() -> Iterator:
+            """
+            Yield frames from the shared queue, but remain stoppable.
+
+            Important: do NOT block indefinitely on Queue.get() or plugin threads
+            consuming this iterator can hang forever during shutdown.
+            """
+            while not stop_event.is_set():
+                try:
+                    # Keep the block bounded so we can observe stop_event.
+                    yield self._frames_q.get(timeout=0.2)
+                except queue.Empty:
+                    continue
 
         try:
             # Pass a new, unique generator instance and the overlay queue to the plugin
@@ -66,6 +80,8 @@ class PluginManager:
             return True
         except Exception as e:
             print(f"[PluginManager] Error starting plugin {name}: {e}")
+            # Ensure we don't leak stop events on failed startup.
+            self._frame_stop_events.pop(name, None)
             raise
 
     def stop(self, name: str) -> bool:
@@ -83,6 +99,12 @@ class PluginManager:
             return False
 
         print(f"[PluginManager] Stopping plugin: {name}")
+
+        # Unblock any plugin thread currently waiting on the frame iterator.
+        stop_evt = self._frame_stop_events.pop(name, None)
+        if stop_evt:
+            stop_evt.set()
+
         inst.stop()
 
         # If we just stopped the last plugin, clear overlays so stale UI doesn't linger.
