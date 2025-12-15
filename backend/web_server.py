@@ -1,8 +1,10 @@
 import asyncio
 import threading
 import queue
+import time
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Optional
+import logging
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,34 +44,105 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str):
-        for connection in self.active_connections:
+        # Copy to avoid mutation during iteration
+        for connection in list(self.active_connections):
             if connection.client_state == WebSocketState.CONNECTED:
-                await connection.send_text(message)
+                try:
+                    await connection.send_text(message)
+                except Exception:
+                    self.disconnect(connection)
 
     async def broadcast_bytes(self, message: bytes):
-        for connection in self.active_connections:
+        # Copy to avoid mutation during iteration
+        for connection in list(self.active_connections):
             if connection.client_state == WebSocketState.CONNECTED:
-                await connection.send_bytes(message)
+                try:
+                    await connection.send_bytes(message)
+                except Exception:
+                    self.disconnect(connection)
+
+    async def broadcast_json(self, obj: Any):
+        # Copy to avoid mutation during iteration
+        for connection in list(self.active_connections):
+            if connection.client_state == WebSocketState.CONNECTED:
+                try:
+                    await connection.send_json(obj)
+                except Exception:
+                    self.disconnect(connection)
 
 # Load environment variables
 dotenv.load_dotenv()
+
+# Feature flags
+PLUGINS_ENABLED = os.getenv("PLUGINS_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+
+# Basic logging configuration (industry-standard: Python stdlib logging).
+# Set LOG_LEVEL=DEBUG to see verbose control-loop logs.
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 # Managers for WebSocket connections
 overlay_manager = ConnectionManager()
 video_manager = ConnectionManager()
 
+class FrameHub:
+    """
+    Fan-out hub for MJPEG frames.
+
+    Each /mjpeg client gets its own asyncio.Queue, so multiple clients don't
+    steal frames from each other.
+    """
+    def __init__(self, per_client_queue_size: int = 2):
+        self._per_client_queue_size = per_client_queue_size
+        self._clients: set[asyncio.Queue] = set()
+        self._lock = asyncio.Lock()
+
+    async def register(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(self._per_client_queue_size)
+        async with self._lock:
+            self._clients.add(q)
+        return q
+
+    async def unregister(self, q: asyncio.Queue) -> None:
+        async with self._lock:
+            self._clients.discard(q)
+
+    async def publish(self, frame: Optional[bytes]) -> None:
+        # Snapshot under lock; we only do non-blocking puts.
+        async with self._lock:
+            clients = list(self._clients)
+
+        for q in clients:
+            try:
+                q.put_nowait(frame)
+            except asyncio.QueueFull:
+                # Drop oldest then try again.
+                try:
+                    _ = q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    q.put_nowait(frame)
+                except Exception:
+                    # Give up on this client queue; it's likely stalled.
+                    await self.unregister(q)
+
+FRAME_HUB = FrameHub(per_client_queue_size=2)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global flight_controller, receiver, plugin_manager, video_keepalive
+    global flight_controller, receiver, plugin_manager
 
     drone_type = os.getenv("DRONE_TYPE", "s2x").lower()
     
-    print(f"[main] Using drone type: {drone_type}")
+    logger.info("[main] Using drone type: %s", drone_type)
 
     if drone_type == "s2x":
-        print("[main] Using S2X drone implementation.")
+        logger.info("[main] Using S2X drone implementation.")
         # Allow overriding IP and ports via env to match prior behavior
         default_ip = "172.16.10.1"
         default_ctrl_port = 8080
@@ -85,7 +158,7 @@ async def lifespan(app: FastAPI):
         try:
             rc_proto.swap_yaw_roll = os.getenv("S2X_SWAP_YAW_ROLL", "false").lower() in ("1", "true", "yes", "on")
             if rc_proto.swap_yaw_roll:
-                print("[main] S2X swap_yaw_roll enabled")
+                logger.info("[main] S2X swap_yaw_roll enabled")
         except Exception:
             pass
         video_adapter_cls = S2xVideoProtocolAdapter
@@ -95,7 +168,7 @@ async def lifespan(app: FastAPI):
             "video_port": video_port,
         }
     elif drone_type == "wifi_uav":
-        print("[main] Using WiFi UAV drone implementation.")
+        logger.info("[main] Using WiFi UAV drone implementation.")
         # Align with previous working setup: env-configurable IP and ports
         default_ip = "192.168.169.1"
         default_ctrl_port = 8800
@@ -115,7 +188,7 @@ async def lifespan(app: FastAPI):
             "debug": False,
         }
     elif drone_type == "debug":
-        print("[main] Using debug drone implementation.")
+        logger.info("[main] Using debug drone implementation.")
         model = DebugRcModel()
         rc_proto = DebugRcProtocolAdapter()
         video_adapter_cls = DebugVideoProtocolAdapter
@@ -144,7 +217,7 @@ async def lifespan(app: FastAPI):
         if os.getenv("RC_DEBUG_PACKETS", "false").lower() in ("1", "true", "yes", "on"):
             try:
                 rc_proto.toggle_debug()
-                print("[main] RC packet debug: ON")
+                logger.info("[main] RC packet debug: ON")
             except Exception:
                 pass
     except Exception:
@@ -153,30 +226,39 @@ async def lifespan(app: FastAPI):
     flight_controller = FlightController(model, rc_proto)
     flight_controller.start()
 
-    # 3. Plugin Manager
-    PLUGIN_FRAME_Q = DroppingQueue(maxsize=100)
-    PLUGIN_OVERLAY_Q = DroppingQueue(maxsize=100)
-    plugin_manager = PluginManager(flight_controller, PLUGIN_FRAME_Q, PLUGIN_OVERLAY_Q)
+    # 3. Plugins (optional)
+    plugin_frame_q: Optional[queue.Queue] = None
+    overlay_broadcaster: Optional["OverlayBroadcaster"] = None
+    if PLUGINS_ENABLED:
+        PLUGIN_FRAME_Q = DroppingQueue(maxsize=100)
+        PLUGIN_OVERLAY_Q = DroppingQueue(maxsize=100)
+        plugin_manager = PluginManager(flight_controller, PLUGIN_FRAME_Q, PLUGIN_OVERLAY_Q)
+        plugin_frame_q = PLUGIN_FRAME_Q
 
-    # 4. start bridge thread (daemon) for video pump
+        # Start overlay broadcaster only when plugins are enabled
+        overlay_broadcaster = OverlayBroadcaster(PLUGIN_OVERLAY_Q, asyncio.get_running_loop())
+        overlay_broadcaster.start()
+        logger.info("[plugins] Plugins enabled")
+    else:
+        plugin_manager = None
+        logger.info("[plugins] Plugins disabled (set PLUGINS_ENABLED=true to enable)")
+
+    # 4. start bridge thread (daemon) for video pump (always, for MJPEG)
     _pump_stop = threading.Event()
     main_loop = asyncio.get_running_loop()
     _pump_thread = threading.Thread(
         target=_frame_pump_worker,
-        args=(RAW_Q, PLUGIN_FRAME_Q, _pump_stop, main_loop),
+        args=(RAW_Q, plugin_frame_q, FRAME_HUB, _pump_stop, main_loop),
         name="FramePump",
         daemon=True,
     )
     _pump_thread.start()
 
-    # 5. Start overlay broadcaster
-    overlay_broadcaster = OverlayBroadcaster(PLUGIN_OVERLAY_Q, main_loop)
-    overlay_broadcaster.start()
-    
     yield
 
     # Shutdown
-    overlay_broadcaster.stop()
+    if overlay_broadcaster:
+        overlay_broadcaster.stop()
     if plugin_manager:
         plugin_manager.stop_all()
     if flight_controller:
@@ -204,19 +286,20 @@ app.add_middleware(
 # Global objects (single-drone)
 # ───────────────────────────────────────────────────────────────
 RAW_Q: queue.Queue = DroppingQueue(maxsize=2)          # thread-safe → pump
-FRAME_Q: asyncio.Queue[bytes] = asyncio.Queue(2)     # asyncio → /mjpeg
 
 flight_controller: Optional[FlightController] = None
 receiver: Optional[VideoReceiverService] = None
 plugin_manager: Optional[PluginManager] = None
 
-video_keepalive: "VideoKeepAlive | None" = None
+video_keepalive = None  # legacy; no longer used
 
 # ───────────────────────────────────────────────────────────────
 # Plugin Management
 # ───────────────────────────────────────────────────────────────
 @app.get("/plugins")
 async def get_plugins():
+    if not PLUGINS_ENABLED:
+        raise HTTPException(status_code=404, detail="Plugins disabled")
     if not plugin_manager:
         raise HTTPException(status_code=503, detail="PluginManager not available")
     return {
@@ -226,21 +309,42 @@ async def get_plugins():
 
 @app.post("/plugins/{name}/start")
 async def start_plugin(name: str):
+    if not PLUGINS_ENABLED:
+        raise HTTPException(status_code=404, detail="Plugins disabled")
     if not plugin_manager:
         raise HTTPException(status_code=503, detail="PluginManager not available")
     try:
-        plugin_manager.start(name)
-        return {"status": "started"}
+        # Current architecture can technically run multiple plugins, but they
+        # will compete for frames from the shared plugin frame queue. For now
+        # we enforce a single running plugin for predictable behavior.
+        running = plugin_manager.running()
+        if running and name not in running:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Another plugin is already running: {running}. Stop it first.",
+            )
+        started = plugin_manager.start(name)
+        if not started:
+            raise HTTPException(status_code=409, detail="Plugin already running")
+        return {"status": "started", "name": name}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/plugins/{name}/stop")
 async def stop_plugin(name: str):
+    if not PLUGINS_ENABLED:
+        raise HTTPException(status_code=404, detail="Plugins disabled")
     if not plugin_manager:
         raise HTTPException(status_code=503, detail="PluginManager not available")
     try:
-        plugin_manager.stop(name)
-        return {"status": "stopped"}
+        stopped = plugin_manager.stop(name)
+        if not stopped:
+            raise HTTPException(status_code=409, detail="Plugin not running")
+        return {"status": "stopped", "name": name}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -254,6 +358,8 @@ async def websocket_overlay_endpoint(websocket: WebSocket):
         while True:
             await websocket.receive_text() # Keep connection open
     except WebSocketDisconnect:
+        overlay_manager.disconnect(websocket)
+    except Exception:
         overlay_manager.disconnect(websocket)
 
 @app.websocket("/ws")
@@ -310,41 +416,18 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 except Exception:
                     pass
     except WebSocketDisconnect:
-        print("[WebSocket] Client disconnected")
+        logger.info("[WebSocket] Client disconnected")
     except Exception as e:
-        print(f"[WebSocket] Error: {e}")
+        logger.exception("[WebSocket] Error: %s", e)
 
 # ───────────────────────────────────────────────────────────────
 # Video streaming
 # ───────────────────────────────────────────────────────────────
 
-class VideoKeepAlive(threading.Thread):
-    def __init__(self, q: queue.Queue, timeout: int = 1):
-        super().__init__(daemon=True)
-        self._q = q
-        self._timeout = timeout
-        self._stop = threading.Event()
-
-    def run(self):
-        while not self._stop.is_set():
-            try:
-                self._q.get(timeout=self._timeout)
-            except queue.Empty:
-                print("[MJPEG] Keep-alive failed. Stopping video stream.")
-                break
-        
-        # This will terminate the /mjpeg endpoint stream
-        try:
-            FRAME_Q.put_nowait(None)
-        except asyncio.QueueFull:
-            pass # Loop may already be closing
-
-    def stop(self):
-        self._stop.set()
-
 def _frame_pump_worker(
     raw_q: queue.Queue,
-    plugin_q: queue.Queue,
+    plugin_q: Optional[queue.Queue],
+    frame_hub: FrameHub,
     stop_event: threading.Event,
     loop: asyncio.AbstractEventLoop,
 ):
@@ -352,53 +435,55 @@ def _frame_pump_worker(
     This worker runs in a separate thread and pumps frames from the
     thread-safe queue to the asyncio queues.
     """
-    global video_keepalive
-    if video_keepalive:
-        video_keepalive.stop()
-
     # Wait for the very first frame before starting keepalive, to avoid
     # prematurely closing the MJPEG stream during initial connection.
     first_frame_seen = False
+    last_frame_time = time.monotonic()
+    timed_out = False
     while not stop_event.is_set() and not first_frame_seen:
         try:
             frame = raw_q.get(timeout=5.0)
             if frame:
                 first_frame_seen = True
+                last_frame_time = time.monotonic()
                 # Send to MJPEG/overlay pipelines immediately
-                try:
-                    FRAME_Q.put_nowait(frame.data)
-                except asyncio.QueueFull:
-                    pass
-                try:
-                    plugin_q.put_nowait(frame)
-                except queue.Full:
-                    pass
+                asyncio.run_coroutine_threadsafe(frame_hub.publish(frame.data), loop)
+                if plugin_q is not None:
+                    try:
+                        plugin_q.put_nowait(frame)
+                    except queue.Full:
+                        pass
                 break
         except queue.Empty:
             # keep waiting for initial frame without killing the stream
             continue
 
-    # Start keepalive after we confirmed frames are flowing
-    video_keepalive = VideoKeepAlive(raw_q, timeout=3)
-    video_keepalive.start()
-
+    # After frames start flowing, if the stream stalls for too long we close
+    # existing MJPEG clients by publishing None. (Pump continues regardless.)
+    stream_timeout_s = 3.0
     while not stop_event.is_set():
         try:
             frame = raw_q.get(timeout=1.0)
             if frame:
+                last_frame_time = time.monotonic()
+                timed_out = False
                 try:
-                    FRAME_Q.put_nowait(frame.data)
-                except asyncio.QueueFull:
+                    asyncio.run_coroutine_threadsafe(frame_hub.publish(frame.data), loop)
+                except Exception:
                     pass
-                try:
-                    plugin_q.put_nowait(frame)
-                except queue.Full:
-                    pass
+                if plugin_q is not None:
+                    try:
+                        plugin_q.put_nowait(frame)
+                    except queue.Full:
+                        pass
         except queue.Empty:
+            if first_frame_seen and not timed_out and (time.monotonic() - last_frame_time) > stream_timeout_s:
+                timed_out = True
+                try:
+                    asyncio.run_coroutine_threadsafe(frame_hub.publish(None), loop)
+                except Exception:
+                    pass
             continue
-
-    if video_keepalive:
-        video_keepalive.stop()
 
 @app.get("/mjpeg")
 async def mjpeg_stream():
@@ -408,14 +493,18 @@ async def mjpeg_stream():
     from fastapi.responses import StreamingResponse
     
     async def frame_generator():
-        while True:
-            frame = await FRAME_Q.get()
-            if frame is None:
-                break
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-            )
+        q = await FRAME_HUB.register()
+        try:
+            while True:
+                frame = await q.get()
+                if frame is None:
+                    break
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+                )
+        finally:
+            await FRAME_HUB.unregister(q)
 
     return StreamingResponse(
         frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame"
@@ -441,12 +530,23 @@ class OverlayBroadcaster:
         while not self.stop_event.is_set():
             try:
                 data = self.q.get(timeout=0.1)
-                if data:
-                    future = asyncio.run_coroutine_threadsafe(
-                        overlay_manager.broadcast(data), self.loop
+                # IMPORTANT: empty overlays are sent as [] and must still be broadcast,
+                # otherwise the frontend will keep rendering the last overlay forever.
+                if data is None:
+                    continue
+
+                # Plugins typically put python objects (lists/dicts) into this queue.
+                # The frontend expects JSON.
+                coro = overlay_manager.broadcast_json(data)
+                # Fallback: if broadcast_json fails for a given payload, send it as text
+                if isinstance(data, (str, bytes)):
+                    coro = overlay_manager.broadcast(
+                        data if isinstance(data, str) else data.decode("utf-8", errors="ignore")
                     )
-                    future.result(timeout=1.0)
+
+                future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+                future.result(timeout=1.0)
             except queue.Empty:
                 continue
             except Exception as e:
-                print(f"[OverlayBroadcaster] Error: {e}")
+                logger.exception("[OverlayBroadcaster] Error: %s", e)

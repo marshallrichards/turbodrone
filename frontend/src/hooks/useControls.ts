@@ -259,6 +259,8 @@ export function useControls() {
     try {
       // Stop all running plugins for simplicity
       const res = await fetch("http://localhost:8000/plugins");
+      // If plugins are disabled on backend, nothing to stop.
+      if (res.status === 404) return;
       if (!res.ok) return;
       const data = await res.json();
       const running: string[] = data?.running ?? [];

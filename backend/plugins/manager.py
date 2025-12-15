@@ -24,9 +24,28 @@ class PluginManager:
     def running(self) -> list[str]:
         return list(self._pool.keys())
 
-    def start(self, name: str):
-        if name in self._pool or name not in self._registry:
+    def clear_overlays(self) -> None:
+        """
+        Clears any currently displayed overlays (frontend will render none).
+        """
+        if not self._overlay_q:
             return
+        try:
+            self._overlay_q.put_nowait([])
+        except Exception:
+            pass
+
+    def start(self, name: str) -> bool:
+        """
+        Starts a plugin by name.
+
+        Returns True if started, False if already running.
+        Raises ValueError if the plugin is unknown.
+        """
+        if name not in self._registry:
+            raise ValueError(f"Unknown plugin: {name}")
+        if name in self._pool:
+            return False
         
         print(f"[PluginManager] Starting plugin: {name}")
         cls = self._registry[name]
@@ -44,14 +63,32 @@ class PluginManager:
                        overlay_queue=self._overlay_q)
             inst.start()
             self._pool[name] = inst
+            return True
         except Exception as e:
             print(f"[PluginManager] Error starting plugin {name}: {e}")
+            raise
 
-    def stop(self, name: str):
+    def stop(self, name: str) -> bool:
+        """
+        Stops a plugin by name.
+
+        Returns True if stopped, False if it wasn't running.
+        Raises ValueError if the plugin is unknown.
+        """
+        if name not in self._registry:
+            raise ValueError(f"Unknown plugin: {name}")
+
         inst = self._pool.pop(name, None)
-        if inst:
-            print(f"[PluginManager] Stopping plugin: {name}")
-            inst.stop()
+        if not inst:
+            return False
+
+        print(f"[PluginManager] Stopping plugin: {name}")
+        inst.stop()
+
+        # If we just stopped the last plugin, clear overlays so stale UI doesn't linger.
+        if not self._pool:
+            self.clear_overlays()
+        return True
 
     def stop_all(self):
         for name in list(self._pool.keys()):

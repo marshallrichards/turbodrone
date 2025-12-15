@@ -1,6 +1,9 @@
 import threading
 import time
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class FlightController:
     """Core service that manages drone flight operations"""
@@ -20,6 +23,8 @@ class FlightController:
         # Logging / diagnostics
         self.last_control_source = "init"
         self._last_log_time = 0.0
+        # When enabled, logs control state at DEBUG level (so it is still quiet
+        # unless LOG_LEVEL=DEBUG).
         self.log_controls = os.getenv("FLIGHT_LOG_CONTROLS", "true").lower() in ("1", "true", "yes", "on")
         
     def start(self):
@@ -71,9 +76,17 @@ class FlightController:
                     state = self.model.get_control_state()
                 except Exception:
                     pass
-                print(
-                    f"[RC-In] src={source:8s} norm T:{self.throttle_dir:+.2f} Y:{self.yaw_dir:+.2f} P:{self.pitch_dir:+.2f} R:{self.roll_dir:+.2f} | "
-                    f"raw T:{state.get('throttle')} Y:{state.get('yaw')} P:{state.get('pitch')} R:{state.get('roll')}"
+                logger.debug(
+                    "[RC-In] src=%-8s norm T:%+.2f Y:%+.2f P:%+.2f R:%+.2f | raw T:%s Y:%s P:%s R:%s",
+                    source,
+                    self.throttle_dir,
+                    self.yaw_dir,
+                    self.pitch_dir,
+                    self.roll_dir,
+                    state.get("throttle"),
+                    state.get("yaw"),
+                    state.get("pitch"),
+                    state.get("roll"),
                 )
         except Exception:
             pass
@@ -115,9 +128,18 @@ class FlightController:
                         state = self.model.get_control_state()
                         strategy = getattr(self.model, "strategy", None)
                         strat_name = strategy.__class__.__name__ if strategy else "(none)"
-                        print(
-                            f"[RC-Loop] src={self.last_control_source:8s} norm T:{self.throttle_dir:+.2f} Y:{self.yaw_dir:+.2f} P:{self.pitch_dir:+.2f} R:{self.roll_dir:+.2f} | "
-                            f"raw T:{state.get('throttle')} Y:{state.get('yaw')} P:{state.get('pitch')} R:{state.get('roll')} | strat={strat_name}"
+                        logger.debug(
+                            "[RC-Loop] src=%-8s norm T:%+.2f Y:%+.2f P:%+.2f R:%+.2f | raw T:%s Y:%s P:%s R:%s | strat=%s",
+                            self.last_control_source,
+                            self.throttle_dir,
+                            self.yaw_dir,
+                            self.pitch_dir,
+                            self.roll_dir,
+                            state.get("throttle"),
+                            state.get("yaw"),
+                            state.get("pitch"),
+                            state.get("roll"),
+                            strat_name,
                         )
                     except Exception:
                         pass

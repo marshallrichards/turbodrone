@@ -9,6 +9,7 @@ interface PluginState {
 }
 
 export function usePlugins() {
+  const [pluginsEnabled, setPluginsEnabled] = useState<boolean>(false);
   const [availablePlugins, setAvailablePlugins] = useState<string[]>([]);
   const [runningPlugins, setRunningPlugins] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -19,8 +20,17 @@ export function usePlugins() {
     try {
       const response = await fetch(`${API_BASE_URL}/plugins`);
       if (!response.ok) {
+        // Backend returns 404 when plugins are disabled.
+        if (response.status === 404) {
+          setPluginsEnabled(false);
+          setAvailablePlugins([]);
+          setRunningPlugins(new Set());
+          setError(null);
+          return;
+        }
         throw new Error('Failed to fetch plugin status');
       }
+      setPluginsEnabled(true);
       const data: PluginState = await response.json();
       setAvailablePlugins(data.available);
       setRunningPlugins(new Set(data.running));
@@ -33,6 +43,7 @@ export function usePlugins() {
 
   // Function to toggle a plugin on or off
   const togglePlugin = useCallback(async (name: string) => {
+    if (!pluginsEnabled) return;
     const isRunning = runningPlugins.has(name);
     const endpoint = isRunning ? 'stop' : 'start';
 
@@ -48,7 +59,7 @@ export function usePlugins() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'An unknown error occurred');
     }
-  }, [runningPlugins, fetchPluginState]);
+  }, [pluginsEnabled, runningPlugins, fetchPluginState]);
 
   // Fetch the initial state when the hook is first used
   useEffect(() => {
@@ -68,6 +79,7 @@ export function usePlugins() {
   }, [fetchPluginState]);
 
   return {
+    pluginsEnabled,
     availablePlugins,
     runningPlugins,
     isLoading,

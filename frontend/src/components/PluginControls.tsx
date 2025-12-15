@@ -1,7 +1,12 @@
 import { usePlugins } from '../hooks/usePlugins';
 
 export function PluginControls() {
-  const { availablePlugins, runningPlugins, isLoading, error, togglePlugin } = usePlugins();
+  const { pluginsEnabled, availablePlugins, runningPlugins, isLoading, error, togglePlugin } = usePlugins();
+
+  // Feature-flagged off by backend (PLUGINS_ENABLED=false)
+  if (!pluginsEnabled && !isLoading) {
+    return null;
+  }
 
   if (isLoading) {
     return <div className="text-white">Loading plugins...</div>;
