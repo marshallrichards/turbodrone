@@ -536,13 +536,14 @@ class OverlayBroadcaster:
                     continue
 
                 # Plugins typically put python objects (lists/dicts) into this queue.
-                # The frontend expects JSON.
-                coro = overlay_manager.broadcast_json(data)
-                # Fallback: if broadcast_json fails for a given payload, send it as text
+                # The frontend expects JSON. IMPORTANT: decide which coroutine to create
+                # BEFORE constructing it, otherwise an un-awaited coroutine may be
+                # garbage-collected (RuntimeWarning: coroutine was never awaited).
                 if isinstance(data, (str, bytes)):
-                    coro = overlay_manager.broadcast(
-                        data if isinstance(data, str) else data.decode("utf-8", errors="ignore")
-                    )
+                    msg = data if isinstance(data, str) else data.decode("utf-8", errors="ignore")
+                    coro = overlay_manager.broadcast(msg)
+                else:
+                    coro = overlay_manager.broadcast_json(data)
 
                 future = asyncio.run_coroutine_threadsafe(coro, self.loop)
                 future.result(timeout=1.0)
