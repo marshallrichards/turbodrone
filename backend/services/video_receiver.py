@@ -5,6 +5,8 @@ import time
 import os
 
 from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
+from utils.dropping_queue import DroppingQueue
+from models.video_frame import VideoFrame
 
 
 class VideoReceiverService:
@@ -26,7 +28,7 @@ class VideoReceiverService:
     ):
         self.protocol_adapter_class = protocol_adapter_class
         self.protocol_adapter_args = protocol_adapter_args
-        self.frame_queue = frame_queue or queue.Queue(maxsize=max_queue_size)
+        self.frame_queue = frame_queue or DroppingQueue(maxsize=max_queue_size)
         self.dump_frames = dump_frames
         self.dump_packets = dump_packets
         self.rc_adapter = rc_adapter
@@ -58,115 +60,106 @@ class VideoReceiverService:
 
     def stop(self) -> None:
         self._running.clear()
-        if self._receiver_thread:
-            self._receiver_thread.join(timeout=2.0)
-            self._receiver_thread = None
-
         if self.protocol:
-            if hasattr(self.protocol, "stop_keepalive"):
-                self.protocol.stop_keepalive()
             self.protocol.stop()
 
-        if self.dump_packets and hasattr(self, "_pktlog"):
+        if self._receiver_thread and self._receiver_thread.is_alive():
+            self._receiver_thread.join(timeout=1.0)
+        
+        if self.dump_packets and self._pktlog:
             self._pktlog.close()
 
-    def get_frame_queue(self):
+    # ────────── stream access ────────── #
+    def get_frame_queue(self) -> queue.Queue:
         return self.frame_queue
-
-    # ────────── internal ────────── #
+    
+    # ────────── receiver loop ────────── #
     def _receiver_loop(self) -> None:
         """
-        The main loop that receives video data. It creates a protocol
-        adapter and will tear it down and rebuild it if the link dies.
+        Manages the lifecycle of the video protocol adapter. If the connection
+        is lost, it will be destroyed and a new one will be created.
         """
-        last_packet_time = time.time()
-        link_dead_timeout = 3.0 # Default
-
         while self._running.is_set():
-            # --- Create/Re-create Protocol Adapter ---
-            if self.protocol is None:
-                print("[receiver] Creating new protocol adapter instance...")
-                try:
-                    self.protocol = self.protocol_adapter_class(**self.protocol_adapter_args)
-                    link_dead_timeout = getattr(self.protocol, "LINK_DEAD_TIMEOUT", 3.0)
-                    last_packet_time = time.time()
-
-                    # For WiFi-UAV, share the video socket with the RC adapter
-                    if self.rc_adapter and hasattr(self.rc_adapter, "set_socket"):
-                        print("[receiver] Sharing new video socket with RC adapter.")
-                        sock = self.protocol.get_receiver_socket()
-                        self.rc_adapter.set_socket(sock)
-
-                    if hasattr(self.protocol, "send_start_command"):
-                        self.protocol.send_start_command()
-                    if hasattr(self.protocol, "start_keepalive"):
-                        self.protocol.start_keepalive()
-
-                except Exception as e:
-                    print(f"[receiver] Failed to create protocol adapter: {e}. Retrying in 5s...")
-                    time.sleep(5)
-                    continue
-
-            # --- Check for Dead Link ---
-            if time.time() - last_packet_time > link_dead_timeout:
-                print(f"[receiver] Link silent for {link_dead_timeout}s. "
-                      "Destroying and recreating protocol adapter.")
-
-                if hasattr(self.protocol, "stop_keepalive"):
-                    self.protocol.stop_keepalive()
-
-                self.protocol.stop()
-                self.protocol = None
-                time.sleep(1)
-                continue
-
-            # --- Receive Data ---
             try:
-                sock = self.protocol.get_receiver_socket()
-                raw = self.protocol.recv_from_socket(sock)
-                if raw is None:
-                    continue  # Standard socket timeout
+                # 1. Create a new protocol instance
+                self.protocol = self.protocol_adapter_class(
+                    **self.protocol_adapter_args
+                )
+                
+                # Special handling for WifiUavVideoProtocolAdapter to pass the RC adapter
+                if isinstance(self.protocol, WifiUavVideoProtocolAdapter) and self.rc_adapter:
+                    self.protocol.set_rc_adapter(self.rc_adapter)
 
-                # quick debug: show first packet after (re)connect
-                if time.time() - last_packet_time > 1.5:
-                    print(f"[receiver] got {len(raw)}-byte packet "
-                          f"(first after reconnect)")
-                last_packet_time = time.time()
+                # 2. Start the protocol's receiver loop
+                self.protocol.start()
+
+                # 3. Frame processing loop
+                frame_idx = 0
+                while self._running.is_set() and self.protocol.is_running():
+                    try:
+                        frame = self.protocol.get_frame(timeout=1.0)
+                        if frame:
+                            self.frame_queue.put(frame)
+
+                            if self.dump_frames:
+                                frame_idx += 1
+                                self._dump_frame(frame, frame_idx)
+                        
+                        # Packets are dumped inside the protocol adapter
+                        if self.dump_packets:
+                            packets = self.protocol.get_packets()
+                            for p in packets:
+                                self._pktlog.write(p)
+                                self._pktlog.flush()
+
+                    except queue.Empty:
+                        continue # Normal, just means no frame was ready
+                    except Exception as e:
+                        print(f"[VideoReceiverService] Error processing frame: {e}")
+                        break
 
             except socket.error as e:
-                print(f"[receiver] Socket error: {e}. Recreating adapter.")
-
-                if hasattr(self.protocol, "stop_keepalive"):
-                    self.protocol.stop_keepalive()
-
-                self.protocol.stop()
-                self.protocol = None
-                continue
+                print(f"[VideoReceiverService] Socket error: {e}. Reconnecting...")
             except Exception as e:
-                print(f"[receiver] Unexpected error: {e}. Terminating.")
-                break
+                print(f"[VideoReceiverService] An unexpected error occurred: {e}")
+                # Optionally, decide if you want to stop the whole loop on certain errors
+                # self.stop()
+                # break
 
-            if self.dump_packets:
-                self._pktlog.write(raw)
+            finally:
+                # Cleanup before the next iteration
+                if self.protocol:
+                    self.protocol.stop()
+                    self.protocol = None
 
-            frame = self.protocol.handle_payload(raw)
-            if not frame:
-                continue
+            # Wait before attempting to reconnect
+            if self._running.is_set():
+                print("[VideoReceiverService] Waiting 5 seconds before reconnecting...")
+                time.sleep(5)
 
-            if self.dump_frames and self.dump_dir:
-                ts = int(time.time() * 1000)
-                with open(
-                    os.path.join(self.dump_dir, f"frame_{frame.frame_id:04x}_{ts}.jpg"),
-                    "wb",
-                ) as f:
-                    f.write(frame.data)
+        print("[VideoReceiverService] Receiver loop has stopped.")
 
-            self.frame_queue.put(frame)
+    # ────────── frame dumping ────────── #
+    def _dump_frame(self, frame: "VideoFrame | bytes | bytearray | memoryview", frame_idx: int) -> None:
+        """
+        Saves a frame to the file system in the dump directory.
 
-        print("[receiver] Receiver loop terminated.")
-        if self.protocol:
-            if hasattr(self.protocol, "stop_keepalive"):
-                self.protocol.stop_keepalive()
-            self.protocol.stop()
-        if self.dump_packets and hasattr(self, "_pktlog"):
-            self._pktlog.close()
+        Note: the receiver loop deals in `VideoFrame` objects; we persist the
+        underlying encoded bytes (`VideoFrame.data`), not the object itself.
+        """
+        if isinstance(frame, VideoFrame):
+            frame_bytes = frame.data
+            ext = "jpg" if getattr(frame, "format", None) in (None, "jpeg", "jpg") else str(frame.format)
+        else:
+            frame_bytes = frame
+            ext = "jpg"
+
+        if not isinstance(frame_bytes, (bytes, bytearray, memoryview)):
+            raise TypeError(f"Expected frame bytes, got {type(frame_bytes).__name__}")
+
+        filename = os.path.join(self.dump_dir, f"frame_{frame_idx:04d}.{ext}")
+        try:
+            with open(filename, "wb") as f:
+                f.write(frame_bytes)
+        except Exception as e:
+            print(f"Error dumping frame: {e}")

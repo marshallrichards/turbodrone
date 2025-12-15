@@ -10,6 +10,9 @@ __pycache__/
 # C extensions
 *.so
 
+# pytorch models
+*.pt
+
 # Distribution / packaging
 .Python
 build/
@@ -160,3 +163,6 @@ public/
 # framework-specific (if you ever add)
 .serverless/
 .vuepress/dist/
+
+# assets
+backend/plugins/follow/assets/*

@@ -1,4 +1,5 @@
 import socket
+import queue
 import threading
 import time
 from typing import Dict, Optional
@@ -27,8 +28,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
     REQUEST_A_OFFSETS = (12, 13)          # two-byte LE frame counter
     REQUEST_B_OFFSETS = (12, 13, 88, 89, 107, 108)
 
-    FRAME_TIMEOUT = 0.10          # 150 ms without a full frame → retry
-    MAX_RETRIES = 2              # after this we skip the frame
+    FRAME_TIMEOUT = 0.08          # 80 ms without a full frame → retry sooner
+    MAX_RETRIES = 3              # allow one more retry for first-frame reliability
     WATCHDOG_SLEEP = 0.05          # 50 ms between watchdog checks
 
     # ------------------------------------------------------------------ #
@@ -50,6 +51,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self.debug = debug
         self._dbg = (lambda *a, **k: print(*a, **k)) if debug else (lambda *a, **k: None)
         self._sock_lock = threading.Lock()
+        self._pkt_lock = threading.Lock()
+        self._pkt_buffer: list[bytes] = []
 
         self._sock = self._create_duplex_socket()
 
@@ -71,6 +74,10 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         # Kick-off the stream and ask for the first frame
         self.send_start_command()
         self._send_frame_request(0) # Request frame 0 to get frame 1
+        # During warmup, resend until we see the first frame
+        self._first_frame = True
+        self._warmup_thread = threading.Thread(target=self._warmup_loop, daemon=True, name="Warmup")
+        self._warmup_thread.start()
 
         # Watchdog for per-frame timeouts
         self._running = True
@@ -170,6 +177,17 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
     # ------------------------------------------------------------------ #
     # helpers
     # ------------------------------------------------------------------ #
+    def _warmup_loop(self) -> None:
+        """During warmup, periodically resend START_STREAM + frame request
+        until the first frame is observed, then exit."""
+        while getattr(self, "_first_frame", False):
+            try:
+                self.send_start_command()
+                # Ask for the previous frame id; the drone will respond with next
+                self._send_frame_request((self._current_fid - 1) & 0xFFFF)
+            except Exception:
+                pass
+            time.sleep(0.2)
     def _send_frame_request(self, frame_id: int) -> None:
         lo, hi = frame_id & 0xFF, (frame_id >> 8) & 0xFF
 
@@ -198,6 +216,74 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         """Returns the main socket for the receiver thread to use."""
         with self._sock_lock:
             return self._sock
+
+    def set_rc_adapter(self, rc_adapter) -> None:
+        """Provide the RC adapter with our shared UDP socket."""
+        try:
+            rc_adapter.set_socket(self._sock)
+            self._dbg("[wifi-uav] RC adapter socket shared")
+        except Exception:
+            # If the RC adapter is not ready or doesn't support socket injection,
+            # ignore and continue – the receiver loop will still function.
+            pass
+
+    # ------------------------------------------------------------------ #
+    # Receiver thread API expected by VideoReceiverService
+    # ------------------------------------------------------------------ #
+    def start(self) -> None:
+        if hasattr(self, "_rx_thread") and self._rx_thread and self._rx_thread.is_alive():
+            return
+        # Small frame buffer; upstream will drop if slow
+        self._frame_q: "queue.Queue[VideoFrame]" = queue.Queue(maxsize=2)
+        with self._pkt_lock:
+            self._pkt_buffer = []
+
+        def _rx_loop() -> None:
+            sock = self.get_receiver_socket()
+            while self._running:
+                try:
+                    payload = self.recv_from_socket(sock)
+                    if not payload:
+                        continue
+                    # Collect raw packet bytes for optional dumping
+                    with self._pkt_lock:
+                        self._pkt_buffer.append(payload)
+                    # Try to assemble a frame
+                    frame = self.handle_payload(payload)
+                    if frame is not None:
+                        try:
+                            self._frame_q.put(frame, timeout=0.2)
+                        except queue.Full:
+                            # Drop frame if consumer is slow
+                            pass
+                except OSError:
+                    # Socket likely closed during stop(); exit loop
+                    break
+                except Exception as e:
+                    self._dbg(f"[wifi-uav] rx error: {e}")
+                    continue
+
+        self._rx_thread = threading.Thread(target=_rx_loop, daemon=True, name="WifiUavVideoRx")
+        self._rx_thread.start()
+
+    def is_running(self) -> bool:
+        return bool(self._running and getattr(self, "_rx_thread", None) and self._rx_thread.is_alive())
+
+    def get_frame(self, timeout: float = 1.0) -> Optional[VideoFrame]:
+        try:
+            frame = self._frame_q.get(timeout=timeout)
+            # mark warmup complete on first delivered frame
+            if getattr(self, "_first_frame", False):
+                self._first_frame = False
+            return frame
+        except queue.Empty:
+            return None
+
+    def get_packets(self) -> list[bytes]:
+        with self._pkt_lock:
+            packets = self._pkt_buffer
+            self._pkt_buffer = []
+            return packets
 
     # ------------------------------------------------------------------ #
     # watchdog
@@ -245,6 +331,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         try:
             if self._watchdog and self._watchdog.is_alive():
                 self._watchdog.join(timeout=0.5)
+            if hasattr(self, "_rx_thread") and self._rx_thread and self._rx_thread.is_alive():
+                self._rx_thread.join(timeout=0.5)
             self._sock.close()
         except Exception as e:
             self._dbg(f"Ignoring error during shutdown: {e}")

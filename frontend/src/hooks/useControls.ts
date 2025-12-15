@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { WSClient } from "../lib/ws";
 
 /* ─────────────────────────────────────────────────────────── */
 /*  Shared types                                               */
@@ -13,15 +12,38 @@ export interface Axes {
 }
 /* ─────────────────────────────────────────────────────────── */
 
-export function useControls(ws: WSClient): {
-  axes: Axes;
-  mode: ControlMode;
-  setMode: (m: ControlMode) => void;
-  gamepadConnected: boolean;
-} {
+export function useControls() {
   /* ------- state refs (mutable) ------- */
   const axesRef = useRef<Axes>({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
   const modeRef = useRef<ControlMode>("inc");
+
+  /* ------- NEW: websocket ref & lifecycle ------- */
+  const ws = useRef<WebSocket | null>(null);
+  
+  /* ------- Plugin state (event-driven) ------- */
+  const pluginRunningRef = useRef<boolean>(false);
+  const stoppedPluginOnceRef = useRef<boolean>(false);    // rate-limit stop calls per burst
+
+  // Open WS once on mount, close on unmount
+  useEffect(() => {
+    ws.current = new WebSocket("ws://localhost:8000/ws");
+    return () => {
+      ws.current?.close();
+      ws.current = null;
+    };
+  }, []);
+
+  // Listen for plugin start/stop events (dispatched from usePlugins and auto-stop)
+  useEffect(() => {
+    const onStart = () => { pluginRunningRef.current = true; };
+    const onStop  = () => { pluginRunningRef.current = false; stoppedPluginOnceRef.current = false; };
+    window.addEventListener('plugin:running', onStart as EventListener);
+    window.addEventListener('plugin:stopped', onStop as EventListener);
+    return () => {
+      window.removeEventListener('plugin:running', onStart as EventListener);
+      window.removeEventListener('plugin:stopped', onStop as EventListener);
+    };
+  }, []);
 
   /* ------- state that triggers re-renders ------- */
   const [axes,  setAxes]  = useState<Axes>(axesRef.current);
@@ -96,6 +118,9 @@ export function useControls(ws: WSClient): {
       if (!m) return;
       axesRef.current[m.axis] = m.dir;
       setAxes({ ...axesRef.current });
+
+      // If any plugin is running and user provides input → stop plugin once
+      maybeStopPluginOnUserInput();
     };
 
     const up = (e: KeyboardEvent) => {
@@ -139,6 +164,12 @@ export function useControls(ws: WSClient): {
         axesRef.current.yaw      = applyDeadzone(gp.axes[2]);     // right X
         axesRef.current.throttle = applyDeadzone(-gp.axes[3]);    // right Y (up == +1)
         setAxes({ ...axesRef.current });
+
+        // Stop plugin when the first non-zero user sticks are detected
+        if (Math.abs(axesRef.current.roll) > 0 || Math.abs(axesRef.current.pitch) > 0 ||
+            Math.abs(axesRef.current.yaw)  > 0 || Math.abs(axesRef.current.throttle) > 0) {
+          maybeStopPluginOnUserInput();
+        }
       }
       raf = requestAnimationFrame(poll);
     };
@@ -159,6 +190,11 @@ export function useControls(ws: WSClient): {
       axesRef.current.roll  = Math.max(-1, Math.min(1, axesRef.current.roll  +  e.movementX * sensitivity));
       axesRef.current.pitch = Math.max(-1, Math.min(1, axesRef.current.pitch - e.movementY * sensitivity));
       setAxes({ ...axesRef.current });
+      
+      // Stop plugin when user moves mouse/trackpoint
+      if (Math.abs(e.movementX) > 0 || Math.abs(e.movementY) > 0) {
+        maybeStopPluginOnUserInput();
+      }
     };
 
     /* gentle recentre so sticks don't stay deflected forever */
@@ -193,12 +229,61 @@ export function useControls(ws: WSClient): {
 
   /* ----------- network TX 30 Hz (treat mouse as "abs") ------- */
   useEffect(() => {
-    const id = setInterval(() => {
-      const modeForBackend = modeRef.current === "mouse" ? "abs" : modeRef.current;
-      ws.send({ type: "axes", mode: modeForBackend, ...axesRef.current });
-    }, 1000 / 30);
-    return () => clearInterval(id);
-  }, [ws]);
+    const interval = setInterval(() => {
+      if (ws.current?.readyState !== WebSocket.OPEN) return;
 
-  return { axes, mode, setMode, gamepadConnected };
+      // COMPLETELY suppress all transmissions when any plugin is running
+      // This prevents frontend from overwriting plugin commands
+      if (pluginRunningRef.current) return;
+
+      ws.current.send(JSON.stringify({
+        type: "axes",
+        mode: modeRef.current,
+        ...axesRef.current,
+      }));
+    }, 1000 / 30);
+    return () => clearInterval(interval);
+  }, []);
+
+  /* ------------- helpers / commands ------------------------- */
+  const sendCommand = (type: string, payload = {}) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type, ...payload }));
+    } else {
+      console.warn("Cannot send command, WebSocket not open.");
+    }
+  };
+
+  const maybeStopPluginOnUserInput = async () => {
+    if (!pluginRunningRef.current || stoppedPluginOnceRef.current) return;
+    try {
+      // Stop all running plugins for simplicity
+      const res = await fetch("http://localhost:8000/plugins");
+      // If plugins are disabled on backend, nothing to stop.
+      if (res.status === 404) return;
+      if (!res.ok) return;
+      const data = await res.json();
+      const running: string[] = data?.running ?? [];
+      await Promise.all(running.map((name) => fetch(`http://localhost:8000/plugins/${name}/stop`, { method: 'POST' })));
+      stoppedPluginOnceRef.current = true;
+      pluginRunningRef.current = false;
+      // notify UI to flip OFF without polling
+      window.dispatchEvent(new CustomEvent('plugin:stopped'));
+    } catch {
+      // Ignore errors when stopping plugins (fire-and-forget)
+    }
+  };
+
+  const takeOff = () => sendCommand("takeoff");
+  const land    = () => sendCommand("land");
+
+  /* ------------- hook return ------------------------------- */
+  return {
+    axes,
+    mode,
+    setMode,
+    gamepadConnected,
+    takeOff,
+    land,
+  };
 }

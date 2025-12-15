@@ -110,6 +110,12 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
             headless & 0xFF,
         ]
 
+        # Stash for debug printing at send time (roll, pitch, throttle, yaw)
+        try:
+            self._last_controls = tuple(controls[:4])
+        except Exception:
+            pass
+
         checksum = 0
         for b in controls:
             checksum ^= b
@@ -152,6 +158,12 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
             self._pkt_counter += 1
             print(f"[wifi-uav] #{self._pkt_counter:05d}   "
                   f"{' '.join(f'{b:02x}' for b in packet[:40])} …")
+            try:
+                r, p, t, y = getattr(self, "_last_controls", (None, None, None, None))
+                if None not in (r, p, t, y):
+                    print(f"[wifi-uav] controls R:{r} P:{p} T:{t} Y:{y}")
+            except Exception:
+                pass
 
     def toggle_debug(self) -> bool:                # type: ignore[override]
         self.debug_packets = not self.debug_packets
