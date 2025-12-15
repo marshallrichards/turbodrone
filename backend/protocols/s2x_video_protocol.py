@@ -36,6 +36,7 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self._running = threading.Event()
         self._rx_thread: Optional[threading.Thread] = None
         self._frame_q: "queue.Queue[VideoFrame]" = queue.Queue(maxsize=2)
+        self._pkt_lock = threading.Lock()
         self._pkt_buffer: List[bytes] = []
 
     # ────────── BaseVideoProtocolAdapter ────────── #
@@ -140,7 +141,8 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
                     payload = self.recv_from_socket(sock)
                     if not payload:
                         continue
-                    self._pkt_buffer.append(payload)
+                    with self._pkt_lock:
+                        self._pkt_buffer.append(payload)
                     frame = self.handle_payload(payload)
                     if frame is not None:
                         try:
@@ -165,9 +167,10 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
             return None
 
     def get_packets(self) -> List[bytes]:
-        packets = self._pkt_buffer
-        self._pkt_buffer = []
-        return packets
+        with self._pkt_lock:
+            packets = self._pkt_buffer
+            self._pkt_buffer = []
+            return packets
 
     def _discover_local_ip(self) -> str:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

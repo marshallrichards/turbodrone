@@ -51,6 +51,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self.debug = debug
         self._dbg = (lambda *a, **k: print(*a, **k)) if debug else (lambda *a, **k: None)
         self._sock_lock = threading.Lock()
+        self._pkt_lock = threading.Lock()
+        self._pkt_buffer: list[bytes] = []
 
         self._sock = self._create_duplex_socket()
 
@@ -233,7 +235,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
             return
         # Small frame buffer; upstream will drop if slow
         self._frame_q: "queue.Queue[VideoFrame]" = queue.Queue(maxsize=2)
-        self._pkt_buffer: list[bytes] = []
+        with self._pkt_lock:
+            self._pkt_buffer = []
 
         def _rx_loop() -> None:
             sock = self.get_receiver_socket()
@@ -243,7 +246,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
                     if not payload:
                         continue
                     # Collect raw packet bytes for optional dumping
-                    self._pkt_buffer.append(payload)
+                    with self._pkt_lock:
+                        self._pkt_buffer.append(payload)
                     # Try to assemble a frame
                     frame = self.handle_payload(payload)
                     if frame is not None:
@@ -276,9 +280,10 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
             return None
 
     def get_packets(self) -> list[bytes]:
-        packets = getattr(self, "_pkt_buffer", [])
-        self._pkt_buffer = []
-        return packets
+        with self._pkt_lock:
+            packets = self._pkt_buffer
+            self._pkt_buffer = []
+            return packets
 
     # ------------------------------------------------------------------ #
     # watchdog
