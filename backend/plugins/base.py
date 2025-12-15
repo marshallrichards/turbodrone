@@ -22,19 +22,29 @@ class Plugin(ABC):
         self.frames = frame_source
         self.overlays = overlay_queue
         self.running = False
+        # Lifecycle guards: make stop() idempotent and ensure cleanup runs
+        # even if subclasses flip `running` directly.
+        self._started = False
+        self._stopped = False
         self.loop_thread = None
 
     def start(self):
         if self.running:
             return
         self.running = True
+        self._started = True
+        self._stopped = False
         self._on_start()
 
     def stop(self):
-        if not self.running:
+        # Idempotent stop: allow cleanup to run once even if `running` was
+        # already set False by a subclass or background thread.
+        if self._stopped:
             return
         self.running = False
-        self._on_stop()
+        self._stopped = True
+        if self._started:
+            self._on_stop()
 
     @abstractmethod
     def _on_start(self):

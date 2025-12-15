@@ -46,8 +46,15 @@ class TestYawPlugin(Plugin):
     def _on_stop(self):
         # Stop worker
         if hasattr(self, "_thread") and self._thread:
-            # Let the run loop exit naturally by checking self.running
-            self._thread.join(timeout=1.0)
+            # Let the run loop exit naturally by checking self.running.
+            # If stop() is called from inside the worker thread (auto-stop),
+            # do NOT join ourselves.
+            try:
+                if threading.current_thread() is not self._thread:
+                    self._thread.join(timeout=1.0)
+            except RuntimeError:
+                # Defensive: joining current thread raises at runtime.
+                pass
 
         # Send zeros once
         try:
@@ -75,8 +82,9 @@ class TestYawPlugin(Plugin):
                 try:
                     print("[TestYawPlugin] Duration elapsed; stopping")
                 finally:
-                    self.running = False
-                    break
+                    # Route through stop() so _on_stop() runs (zeros + restore strategy)
+                    self.stop()
+                    return
 
             # Apply yaw deflection only
             try:
