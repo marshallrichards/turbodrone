@@ -9,8 +9,10 @@ export function useVideoSizing() {
   const recalculate = useCallback(() => {
     const img = document.querySelector('img[alt="Drone video feed"]') as HTMLImageElement;
     if (!img || !img.parentElement) return;
+    if (img.naturalWidth === 0 || img.naturalHeight === 0) return;
 
     const container = img.parentElement;
+    if (container.clientWidth === 0 || container.clientHeight === 0) return;
     const containerAR = container.clientWidth / container.clientHeight;
     const videoAR = img.naturalWidth / img.naturalHeight;
 

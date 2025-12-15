@@ -6,6 +6,7 @@ import os
 
 from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
 from utils.dropping_queue import DroppingQueue
+from models.video_frame import VideoFrame
 
 
 class VideoReceiverService:
@@ -139,13 +140,26 @@ class VideoReceiverService:
         print("[VideoReceiverService] Receiver loop has stopped.")
 
     # ────────── frame dumping ────────── #
-    def _dump_frame(self, frame_data: bytes, frame_idx: int) -> None:
+    def _dump_frame(self, frame: "VideoFrame | bytes | bytearray | memoryview", frame_idx: int) -> None:
         """
         Saves a frame to the file system in the dump directory.
+
+        Note: the receiver loop deals in `VideoFrame` objects; we persist the
+        underlying encoded bytes (`VideoFrame.data`), not the object itself.
         """
-        filename = os.path.join(self.dump_dir, f"frame_{frame_idx:04d}.jpg")
+        if isinstance(frame, VideoFrame):
+            frame_bytes = frame.data
+            ext = "jpg" if getattr(frame, "format", None) in (None, "jpeg", "jpg") else str(frame.format)
+        else:
+            frame_bytes = frame
+            ext = "jpg"
+
+        if not isinstance(frame_bytes, (bytes, bytearray, memoryview)):
+            raise TypeError(f"Expected frame bytes, got {type(frame_bytes).__name__}")
+
+        filename = os.path.join(self.dump_dir, f"frame_{frame_idx:04d}.{ext}")
         try:
             with open(filename, "wb") as f:
-                f.write(frame_data)
+                f.write(frame_bytes)
         except Exception as e:
             print(f"Error dumping frame: {e}")
