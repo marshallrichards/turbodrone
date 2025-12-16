@@ -14,6 +14,10 @@ from models.wifi_uav_rc import WifiUavRcModel
 from protocols.wifi_uav_rc_protocol_adapter import WifiUavRcProtocolAdapter
 from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
 
+from models.cooingdv_rc import CooingdvRcModel
+from protocols.cooingdv_rc_protocol_adapter import CooingdvRcProtocolAdapter
+from protocols.cooingdv_video_protocol import CooingdvVideoProtocolAdapter
+
 from services.flight_controller import FlightController
 from services.video_receiver import VideoReceiverService
 from views.cli_rc import CLIView
@@ -22,10 +26,10 @@ from views.opencv_video_view import OpenCVVideoView
 def main():
     parser = argparse.ArgumentParser(description="Drone teleoperation interface")
     parser.add_argument("--drone-type", type=str, default="s2x", 
-                        choices=["s2x", "wifi_uav"],
-                        help="Type of drone to control (s2x or wifi_uav, default: s2x)")
+                        choices=["s2x", "wifi_uav", "cooingdv"],
+                        help="Type of drone to control (s2x, wifi_uav, or cooingdv, default: s2x)")
     parser.add_argument("--drone-ip", type=str,
-                        help="Drone UDP IP address (default: s2x=172.16.10.1, wifi_uav=192.168.169.1)")
+                        help="Drone UDP IP address (default: s2x=172.16.10.1, wifi_uav=192.168.169.1, cooingdv=192.168.1.1)")
     parser.add_argument("--control-port", type=int,
                         help="Drone control port (default: s2x=8080, wifi_uav=8800)")
     parser.add_argument("--video-port", type=int,
@@ -67,6 +71,19 @@ def main():
         drone_model = WifiUavRcModel()
         protocol_adapter = WifiUavRcProtocolAdapter(drone_ip, control_port)
         video_protocol_adapter_class = WifiUavVideoProtocolAdapter
+    elif args.drone_type == "cooingdv":
+        print("[main] Using Cooingdv drone implementation (RC UFO, KY UFO, E88 Pro).")
+        default_ip = "192.168.1.1"
+        default_control_port = 7099
+        default_video_port = 7070  # RTSP port for video streaming
+
+        drone_ip = args.drone_ip if args.drone_ip else default_ip
+        control_port = args.control_port if args.control_port else default_control_port
+        video_port = args.video_port if args.video_port else default_video_port
+
+        drone_model = CooingdvRcModel()
+        protocol_adapter = CooingdvRcProtocolAdapter(drone_ip, control_port)
+        video_protocol_adapter_class = CooingdvVideoProtocolAdapter
     else:
         # Should not happen due to choices in argparse
         print(f"[main] Unknown drone type: {args.drone_type}", file=sys.stderr)
@@ -91,6 +108,12 @@ def main():
                 "video_port": video_port
             }
         elif args.drone_type == "wifi_uav":
+            video_protocol_args = {
+                "drone_ip": drone_ip,
+                "control_port": control_port,
+                "video_port": video_port
+            }
+        elif args.drone_type == "cooingdv":
             video_protocol_args = {
                 "drone_ip": drone_ip,
                 "control_port": control_port,
