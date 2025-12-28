@@ -90,8 +90,8 @@ class VideoStreamThread(QThread):
                     # Rotate the image 90 degrees clockwise
                     rgb_image = cv2.rotate(rgb_image, cv2.ROTATE_90_CLOCKWISE)
                     h, w, ch = rgb_image.shape
-                    bytes_per_line = ch * w
-                    convert_to_qt_format = QImage(rgb_image.data, w, h, bytes_per_line, qt_format)
+                    bytes_per_line = rgb_image.strides[0]
+                    convert_to_qt_format = QImage(rgb_image.data, w, h, bytes_per_line, qt_format).copy()
                     p = convert_to_qt_format.scaled(640, 480, Qt.KeepAspectRatio) # Scale for display
                     self.change_pixmap_signal.emit(QPixmap.fromImage(p))
                 else:
@@ -384,6 +384,7 @@ class RTSPViewerApp(QMainWindow):
         """Slot to update the QLabel with new video frames."""
         self.image_label.setPixmap(pixmap)
         self.image_label.setText("") # Clear loading text once video starts
+        self.image_label.setStyleSheet("background-color: black; border: 1px solid gray;")
 
     @pyqtSlot(bytes, tuple)
     def update_udp_response(self, data, addr):
