@@ -150,6 +150,10 @@ class UDPListenerThread(QThread):
         try:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # UDP socket
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # Allow reusing the address
+            try:
+                self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except (AttributeError, OSError):
+                pass
             # Bind to all available network interfaces on the specified port
             self._sock.bind((self._listen_ip, self._port))
             self._sock.settimeout(1.0) # Set a timeout to allow graceful shutdown
@@ -187,6 +191,7 @@ class UDPListenerThread(QThread):
             except OSError:
                 pass # Socket might already be closed or in a bad state
         self.wait() # Wait for the thread to finish
+
 
 # --- Main Application Window ---
 class RTSPViewerApp(QMainWindow):
@@ -251,6 +256,15 @@ class RTSPViewerApp(QMainWindow):
         self.image_label.setStyleSheet("background-color: black; color: white; border: 1px solid gray;")
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # UDP socket
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        except (AttributeError, OSError):
+            pass
+        try:
+            self.sock.bind(("", UDP_SEND_PORT))
+        except OSError:
+            pass
 
         # Ensure the widget itself can receive key press events
         # We also want it to be able to re-gain focus after buttons are clicked
@@ -268,10 +282,13 @@ class RTSPViewerApp(QMainWindow):
 
     def send(self):
         if self.flip:
-            self.basebytes[5]+=self.SOMERSAULT
+            self.basebytes[5] += self.SOMERSAULT
+            self.flip = False
         if self.headless:
-            self.basebytes[5]+=self.HEADLESS
-        self.send_udp_command(bytes(bytearray(b'\x03') + self.basebytes))
+            self.basebytes[5] += self.HEADLESS
+ 
+        pkt = self.xor(bytearray(self.basebytes))
+        self.send_udp_command(bytes(bytearray(b'\x03') + pkt))
         if time.time() - self.last_heartbeat > 1:
             self.send_udp_command(b'\x01\x01')
             self.last_heartbeat = time.time()
