@@ -10,9 +10,17 @@ export interface Axes {
   pitch:    number;  // -1 … +1  (back / fwd)
   roll:     number;  // -1 … +1  (left / right)
 }
+
+export interface CommandCapabilities {
+  takeoff: boolean;
+  land: boolean;
+  estop: boolean;
+}
 /* ─────────────────────────────────────────────────────────── */
 
 export function useControls() {
+  const API_BASE_URL = "http://localhost:8000";
+
   /* ------- state refs (mutable) ------- */
   const axesRef = useRef<Axes>({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
   const modeRef = useRef<ControlMode>("inc");
@@ -49,6 +57,12 @@ export function useControls() {
   const [axes,  setAxes]  = useState<Axes>(axesRef.current);
   const [mode,  setModeSt] = useState<ControlMode>("inc");
   const [gamepadConnected, setGamepadConnected] = useState<boolean>(false);
+  const [droneType, setDroneType] = useState<string>("unknown");
+  const [commandCapabilities, setCommandCapabilities] = useState<CommandCapabilities>({
+    takeoff: true,
+    land: true,
+    estop: true,
+  });
 
   // Track previous gamepad status to avoid spam
   const prevGamepadStatus = useRef<boolean>(false);
@@ -57,6 +71,33 @@ export function useControls() {
   const setMode = useCallback((m: ControlMode) => {
     modeRef.current = m;
     setModeSt(m);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchCapabilities = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/capabilities`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (cancelled) return;
+
+        setDroneType(data?.drone_type ?? "unknown");
+        setCommandCapabilities({
+          takeoff: Boolean(data?.commands?.takeoff),
+          land: Boolean(data?.commands?.land),
+          estop: Boolean(data?.commands?.estop),
+        });
+      } catch {
+        // Keep optimistic defaults when the backend is temporarily unavailable.
+      }
+    };
+
+    fetchCapabilities();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   /* --------------- gamepad detection --------------- */
@@ -183,6 +224,7 @@ export function useControls() {
 
     const sensitivity = 0.015;      // tune to taste for TrackPoint
     const decay       = 0.90;       // spring-back to centre when idle
+    const axesState = axesRef.current;
     let rafId = 0;
 
     /* convert mouse deltas → roll / pitch  (-y = pitch forward) */
@@ -222,8 +264,9 @@ export function useControls() {
       window.removeEventListener("mousemove", onMove);
       document.removeEventListener("pointerlockchange", onLockChange);
       cancelAnimationFrame(rafId);
-      axesRef.current.roll = axesRef.current.pitch = 0;
-      setAxes({ ...axesRef.current });
+      axesState.roll = 0;
+      axesState.pitch = 0;
+      setAxes((prev) => ({ ...prev, roll: 0, pitch: 0 }));
     };
   }, [mode, setMode]);
 
@@ -258,13 +301,13 @@ export function useControls() {
     if (!pluginRunningRef.current || stoppedPluginOnceRef.current) return;
     try {
       // Stop all running plugins for simplicity
-      const res = await fetch("http://localhost:8000/plugins");
+      const res = await fetch(`${API_BASE_URL}/plugins`);
       // If plugins are disabled on backend, nothing to stop.
       if (res.status === 404) return;
       if (!res.ok) return;
       const data = await res.json();
       const running: string[] = data?.running ?? [];
-      await Promise.all(running.map((name) => fetch(`http://localhost:8000/plugins/${name}/stop`, { method: 'POST' })));
+      await Promise.all(running.map((name) => fetch(`${API_BASE_URL}/plugins/${name}/stop`, { method: 'POST' })));
       stoppedPluginOnceRef.current = true;
       pluginRunningRef.current = false;
       // notify UI to flip OFF without polling
@@ -276,6 +319,7 @@ export function useControls() {
 
   const takeOff = () => sendCommand("takeoff");
   const land    = () => sendCommand("land");
+  const emergencyStop = () => sendCommand("estop");
 
   /* ------------- hook return ------------------------------- */
   return {
@@ -283,7 +327,10 @@ export function useControls() {
     mode,
     setMode,
     gamepadConnected,
+    droneType,
+    commandCapabilities,
     takeOff,
     land,
+    emergencyStop,
   };
 }

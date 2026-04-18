@@ -6,13 +6,30 @@ import { PluginControls } from './components/PluginControls';
 import { DrawingOverlay } from './components/DrawingOverlay';
 
 function App() {
-  const { axes, mode, setMode, gamepadConnected, takeOff, land } = useControls();
+  const {
+    axes,
+    mode,
+    setMode,
+    gamepadConnected,
+    droneType,
+    commandCapabilities,
+    takeOff,
+    land,
+    emergencyStop,
+  } = useControls();
 
   return (
     <div className="relative w-screen h-screen bg-black">
       <VideoFeed src="http://localhost:8000/mjpeg" />
       <DrawingOverlay />
-      <ControlsOverlay axes={axes} onTakeoff={takeOff} onLand={land} />
+      <ControlsOverlay
+        axes={axes}
+        droneType={droneType}
+        commandCapabilities={commandCapabilities}
+        onTakeoff={takeOff}
+        onLand={land}
+        onEstop={emergencyStop}
+      />
       <ControlSchemeToggle mode={mode} setMode={setMode} gamepadConnected={gamepadConnected} />
       <PluginControls />
     </div>

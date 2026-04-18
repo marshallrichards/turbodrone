@@ -59,7 +59,12 @@ class WifiUavRcModel(BaseRCModel):
         self.takeoff_flag = True
 
     def land(self):
+        """Request the app's normal land / descend action."""
         self.land_flag = True
+
+    def emergency_stop(self):
+        """Immediate motor stop, distinct from the normal land action."""
+        self.stop_flag = True
 
     # unsupported – always returns 0
     def toggle_record(self):             # type: ignore[override]

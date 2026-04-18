@@ -1,11 +1,14 @@
 import importlib
 import inspect
+import logging
 import pkgutil
 import queue
 import threading
 from typing import Dict, Iterator, Type
 from services.flight_controller import FlightController
 from .base import Plugin
+
+logger = logging.getLogger(__name__)
 
 class PluginManager:
     def __init__(self,
@@ -49,7 +52,7 @@ class PluginManager:
         if name in self._pool:
             return False
         
-        print(f"[PluginManager] Starting plugin: {name}")
+        logger.info("[PluginManager] Starting plugin: %s", name)
         cls = self._registry[name]
 
         stop_event = threading.Event()
@@ -79,7 +82,7 @@ class PluginManager:
             self._pool[name] = inst
             return True
         except Exception as e:
-            print(f"[PluginManager] Error starting plugin {name}: {e}")
+            logger.exception("[PluginManager] Error starting plugin %s: %s", name, e)
             # Ensure we don't leak stop events on failed startup.
             self._frame_stop_events.pop(name, None)
             raise
@@ -98,7 +101,7 @@ class PluginManager:
         if not inst:
             return False
 
-        print(f"[PluginManager] Stopping plugin: {name}")
+        logger.info("[PluginManager] Stopping plugin: %s", name)
 
         # Unblock any plugin thread currently waiting on the frame iterator.
         stop_evt = self._frame_stop_events.pop(name, None)
@@ -129,4 +132,4 @@ class PluginManager:
                 # Ensure it's a direct subclass of Plugin and not Plugin itself
                 if issubclass(obj, Plugin) and obj is not Plugin:
                     self._registry[obj.__name__] = obj
-                    print(f"[PluginManager] Discovered plugin: {obj.__name__}") 
+                    logger.debug("[PluginManager] Discovered plugin: %s", obj.__name__)

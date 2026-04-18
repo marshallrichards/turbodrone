@@ -9,6 +9,10 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
     """
     Builds and transmits control packets for the WiFi-UAV family.
     Packet layout derived from reverse-engineered Android app traces.
+
+    The decompiled WiFi-UAV app exposes separate land and emergency-stop
+    controls. We preserve that distinction in the command byte here instead of
+    collapsing both actions into the same value.
     """
 
     DEFAULT_DRONE_IP: Final = "192.168.169.1"
@@ -36,6 +40,11 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         0x03, 0x00, 0x00, 0x00, 0x10, 0x00,
         0x00, 0x00
     ])
+
+    FLAG_TAKEOFF = 0x01
+    FLAG_LAND = 0x02
+    FLAG_STOP = 0x04
+    FLAG_CALIBRATION = 0x80
 
     # ------------------------------------------------------------------ #
     def __init__(self,
@@ -87,16 +96,15 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         self._ctr3 = (self._ctr3 + 1) & 0xFFFF
 
         # ----- command / headless --------------------------------------
+        command = 0x00
         if drone_model.takeoff_flag:
-            command = 0x01
-        elif drone_model.stop_flag:
-            command = 0x02
-        elif drone_model.land_flag:
-            command = 0x02
-        elif drone_model.calibration_flag:
-            command = 0x04
-        else:
-            command = 0x00
+            command |= self.FLAG_TAKEOFF
+        if drone_model.land_flag:
+            command |= self.FLAG_LAND
+        if drone_model.stop_flag:
+            command |= self.FLAG_STOP
+        if drone_model.calibration_flag:
+            command |= self.FLAG_CALIBRATION
 
         headless = 0x03 if drone_model.headless_flag else 0x02
 
@@ -113,6 +121,8 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         # Stash for debug printing at send time (roll, pitch, throttle, yaw)
         try:
             self._last_controls = tuple(controls[:4])
+            self._last_command = command & 0xFF
+            self._last_headless = headless & 0xFF
         except Exception:
             pass
 
@@ -162,6 +172,19 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
                 r, p, t, y = getattr(self, "_last_controls", (None, None, None, None))
                 if None not in (r, p, t, y):
                     print(f"[wifi-uav] controls R:{r} P:{p} T:{t} Y:{y}")
+                command = getattr(self, "_last_command", None)
+                if command is not None:
+                    flags = []
+                    if command & self.FLAG_TAKEOFF:
+                        flags.append("TAKEOFF")
+                    if command & self.FLAG_LAND:
+                        flags.append("LAND")
+                    if command & self.FLAG_STOP:
+                        flags.append("STOP")
+                    if command & self.FLAG_CALIBRATION:
+                        flags.append("CALIBRATE")
+                    if flags:
+                        print(f"[wifi-uav] command flags: {', '.join(flags)}")
             except Exception:
                 pass
 

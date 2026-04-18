@@ -104,8 +104,18 @@ class S2xDroneModel(BaseRCModel):
         self.takeoff_flag = True
     
     def land(self):
-        """Set land flag"""
+        """
+        Request the stock app's land action.
+
+        In the HiTurbo app this shares the same one-shot flight bit as takeoff,
+        so the protocol adapter maps the semantic intent rather than a distinct
+        dedicated land bit.
+        """
         self.land_flag = True
+
+    def emergency_stop(self):
+        """Set the emergency stop flag."""
+        self.stop_flag = True
     
     def get_control_state(self):
         """Get current control state as a dict"""

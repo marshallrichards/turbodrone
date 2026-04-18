@@ -10,6 +10,7 @@ This adapter uses OpenCV's VideoCapture to connect to the RTSP stream
 and provides frames through the standard turbodrone interface.
 """
 
+import logging
 import cv2
 import queue
 import threading
@@ -18,6 +19,8 @@ from typing import Final, Optional, List
 
 from models.video_frame import VideoFrame
 from protocols.base_video_protocol import BaseVideoProtocolAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class CooingdvVideoProtocolAdapter(BaseVideoProtocolAdapter):
@@ -57,8 +60,8 @@ class CooingdvVideoProtocolAdapter(BaseVideoProtocolAdapter):
     ):
         super().__init__(drone_ip, control_port, video_port)
         
-        self.debug = debug
-        self._dbg = (lambda *a, **k: print(*a, **k)) if debug else (lambda *a, **k: None)
+        self.debug = debug or logger.isEnabledFor(logging.DEBUG)
+        self._dbg = logger.debug if self.debug else (lambda *a, **k: None)
         
         # Build RTSP URL
         self.rtsp_url = f"rtsp://{drone_ip}:{video_port}{self.RTSP_PATH}"

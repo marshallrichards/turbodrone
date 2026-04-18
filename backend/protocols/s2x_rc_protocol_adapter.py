@@ -26,16 +26,22 @@ class S2xRCProtocolAdapter(BaseProtocolAdapter):
         # Byte 6 for command flags
         pkt[6] = 0x00
         
-        # Handle one-shot flags
+        # The stock HiTurbo app uses the same one-shot bit for both takeoff and
+        # land, while emergency stop is a separate bit.
         if drone_model.takeoff_flag:
             pkt[6] |= 0x01
         if drone_model.land_flag:
-            pkt[6] |= 0x02
+            pkt[6] |= 0x01
         if drone_model.stop_flag:
+            pkt[6] |= 0x02
+        if drone_model.calibration_flag:
             pkt[6] |= 0x04
 
-        # Byte 7 - base value 0x0a
+        # Byte 7 - base value 0x0a (matches the stock app's default control
+        # mode bits) plus optional headless flag.
         pkt[7] = 0x0a
+        if drone_model.headless_flag:
+            pkt[7] |= 0x01
         
         # bytes 8-17 are zero-filled
 
@@ -50,6 +56,7 @@ class S2xRCProtocolAdapter(BaseProtocolAdapter):
         drone_model.takeoff_flag = False
         drone_model.land_flag = False
         drone_model.stop_flag = False
+        drone_model.calibration_flag = False
 
         return bytes(pkt)
         
@@ -72,9 +79,9 @@ class S2xRCProtocolAdapter(BaseProtocolAdapter):
             flags6 = packet[6]
             flags7 = packet[7]
             flags_desc = []
-            if flags6 & 0x01: flags_desc.append("TAKEOFF")
-            if flags6 & 0x02: flags_desc.append("LAND")
-            if flags6 & 0x04: flags_desc.append("STOP")
+            if flags6 & 0x01: flags_desc.append("FLY_OR_LAND")
+            if flags6 & 0x02: flags_desc.append("STOP")
+            if flags6 & 0x04: flags_desc.append("CALIBRATE")
             if flags7 & 0x01: flags_desc.append("HEADLESS")
             
             print(f"  Flags: {flags_desc}")

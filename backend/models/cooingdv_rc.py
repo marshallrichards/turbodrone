@@ -26,15 +26,10 @@ class CooingdvRcModel(BaseRCModel):
     Protocol details from decompiled apps:
     - Stick center: 128 (0x80)
     - Safe operating range: 50-200 (apps use these bounds)
-    - Control packet rate: 30-80 Hz recommended
-
-    Command flags (byte 5 in packet):
-    - 0x01: Takeoff
-    - 0x02: Soft Land (gradual descent)
-    - 0x04: Emergency Stop (immediate motor cutoff)
-    - 0x08: Flip/Somersault
-    - 0x10: Headless Mode toggle
-    - 0x80: Gyro Calibration
+    - The stock apps send control updates every 50 ms (about 20 Hz)
+    - The CooingDV family has at least two packet variants: short "TC" and
+      extended "GL". This model exposes the shared high-level commands while
+      the protocol adapter maps them onto the correct flag layout.
     """
 
     # Stick range from decompiled FlyController.java

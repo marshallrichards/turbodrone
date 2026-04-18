@@ -1,16 +1,27 @@
 import AxisIndicator from "./AxisIndicator";
-import type { Axes } from "../hooks/useControls";
+import type { Axes, CommandCapabilities } from "../hooks/useControls";
 import CommandButtons from "./CommandButtons";
 
 interface ControlsOverlayProps {
   axes: Axes;
+  droneType: string;
+  commandCapabilities: CommandCapabilities;
   onTakeoff: () => void;
   onLand: () => void;
+  onEstop: () => void;
 }
 
-export default function ControlsOverlay({ axes, onTakeoff, onLand }: ControlsOverlayProps) {
+export default function ControlsOverlay({
+  axes,
+  droneType,
+  commandCapabilities,
+  onTakeoff,
+  onLand,
+  onEstop,
+}: ControlsOverlayProps) {
   const left   = { x: axes.roll,     y: axes.pitch };
   const right  = { x: axes.yaw,      y: axes.throttle };
+  const droneLabel = droneType === "unknown" ? "Unknown" : droneType.replace(/_/g, " ").toUpperCase();
 
   return (
     <div className="absolute inset-0 pointer-events-none z-10">
@@ -33,7 +44,13 @@ export default function ControlsOverlay({ axes, onTakeoff, onLand }: ControlsOve
       {/* Controls Area: Buttons and Sticks */}
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-5 z-20 pointer-events-auto">
         {/* Command Buttons Cluster */}
-        <CommandButtons onTakeoff={onTakeoff} onLand={onLand} />
+        <CommandButtons
+          droneType={droneLabel}
+          capabilities={commandCapabilities}
+          onTakeoff={onTakeoff}
+          onLand={onLand}
+          onEstop={onEstop}
+        />
 
         {/* Sticks */}
         <div className="flex gap-10">
