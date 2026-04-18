@@ -17,6 +17,7 @@ import threading
 import time
 from typing import Final, Optional, List
 
+from models.cooingdv_video_model import CooingdvVideoModel
 from models.video_frame import VideoFrame
 from protocols.base_video_protocol import BaseVideoProtocolAdapter
 
@@ -59,6 +60,7 @@ class CooingdvVideoProtocolAdapter(BaseVideoProtocolAdapter):
         debug: bool = False,
     ):
         super().__init__(drone_ip, control_port, video_port)
+        self.model = CooingdvVideoModel()
         
         self.debug = debug or logger.isEnabledFor(logging.DEBUG)
         self._dbg = logger.debug if self.debug else (lambda *a, **k: None)
@@ -84,7 +86,6 @@ class CooingdvVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self.frames_ok = 0
         self.frames_dropped = 0
         self.reconnect_count = 0
-        self._frame_id = 0
         self._last_frame_time = time.time()
 
     # ------------------------------------------------------------------ #
@@ -166,9 +167,9 @@ class CooingdvVideoProtocolAdapter(BaseVideoProtocolAdapter):
 
     def handle_payload(self, payload: bytes) -> Optional[VideoFrame]:
         """
-        Not used for RTSP - frames come from OpenCV directly.
+        Wrap one encoded RTSP frame using the shared video-model interface.
         """
-        return None
+        return self.model.ingest_chunk(payload=payload)
 
     # ------------------------------------------------------------------ #
     # Receiver Thread API (matches existing interface)
@@ -221,18 +222,16 @@ class CooingdvVideoProtocolAdapter(BaseVideoProtocolAdapter):
                     continue
                 
                 self._last_frame_time = time.time()
-                self._frame_id += 1
-                self.frames_ok += 1
                 
                 # Encode as JPEG (OpenCV handles BGR→YCbCr conversion internally)
                 encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
                 _, jpeg_data = cv2.imencode('.jpg', frame, encode_param)
                 
-                # Create VideoFrame
-                video_frame = VideoFrame(
-                    frame_id=self._frame_id,
-                    data=jpeg_data.tobytes(),
-                )
+                video_frame = self.handle_payload(jpeg_data.tobytes())
+                if video_frame is None:
+                    continue
+
+                self.frames_ok += 1
                 
                 # Add to queue (drop if full)
                 try:
