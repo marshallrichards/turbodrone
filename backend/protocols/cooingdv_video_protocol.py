@@ -50,6 +50,7 @@ class CooingdvVideoProtocolAdapter(BaseVideoProtocolAdapter):
     
     # Frame capture settings
     FRAME_TIMEOUT: Final = 5.0  # seconds without frame triggers reconnect
+    READ_FAILURE_BACKOFF: Final = 0.05  # seconds between failed reads
 
     def __init__(
         self,
@@ -219,6 +220,8 @@ class CooingdvVideoProtocolAdapter(BaseVideoProtocolAdapter):
                     if time.time() - self._last_frame_time > self.FRAME_TIMEOUT:
                         self._dbg("[cooingdv-video] Frame timeout, reconnecting...")
                         self._reconnect()
+                    else:
+                        time.sleep(self.READ_FAILURE_BACKOFF)
                     continue
                 
                 self._last_frame_time = time.time()
