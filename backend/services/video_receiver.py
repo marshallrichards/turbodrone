@@ -3,10 +3,13 @@ import socket
 import threading
 import time
 import os
+import logging
 
 from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
 from utils.dropping_queue import DroppingQueue
 from models.video_frame import VideoFrame
+
+logger = logging.getLogger(__name__)
 
 
 class VideoReceiverService:
@@ -115,13 +118,13 @@ class VideoReceiverService:
                     except queue.Empty:
                         continue # Normal, just means no frame was ready
                     except Exception as e:
-                        print(f"[VideoReceiverService] Error processing frame: {e}")
+                        logger.warning("[VideoReceiverService] Error processing frame: %s", e)
                         break
 
             except socket.error as e:
-                print(f"[VideoReceiverService] Socket error: {e}. Reconnecting...")
+                logger.warning("[VideoReceiverService] Socket error: %s. Reconnecting...", e)
             except Exception as e:
-                print(f"[VideoReceiverService] An unexpected error occurred: {e}")
+                logger.exception("[VideoReceiverService] Unexpected error: %s", e)
                 # Optionally, decide if you want to stop the whole loop on certain errors
                 # self.stop()
                 # break
@@ -134,10 +137,10 @@ class VideoReceiverService:
 
             # Wait before attempting to reconnect
             if self._running.is_set():
-                print("[VideoReceiverService] Waiting 5 seconds before reconnecting...")
+                logger.debug("[VideoReceiverService] Waiting 5 seconds before reconnecting...")
                 time.sleep(5)
 
-        print("[VideoReceiverService] Receiver loop has stopped.")
+        logger.debug("[VideoReceiverService] Receiver loop has stopped.")
 
     # ────────── frame dumping ────────── #
     def _dump_frame(self, frame: "VideoFrame | bytes | bytearray | memoryview", frame_idx: int) -> None:
@@ -162,4 +165,4 @@ class VideoReceiverService:
             with open(filename, "wb") as f:
                 f.write(frame_bytes)
         except Exception as e:
-            print(f"Error dumping frame: {e}")
+            logger.warning("[VideoReceiverService] Error dumping frame: %s", e)

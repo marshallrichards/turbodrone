@@ -5,12 +5,14 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 import logging
+import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketState
-import os
-import dotenv
+from utils.logging_config import bootstrap_runtime, configure_logging
+
+bootstrap_runtime()
 
 from services.flight_controller import FlightController
 from control.strategies import DirectStrategy, IncrementalStrategy
@@ -24,6 +26,9 @@ from protocols.debug_video_protocol import DebugVideoProtocolAdapter
 from protocols.wifi_uav_rc_protocol_adapter import WifiUavRcProtocolAdapter
 from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
 from models.wifi_uav_rc import WifiUavRcModel
+from models.cooingdv_rc import CooingdvRcModel
+from protocols.cooingdv_rc_protocol_adapter import CooingdvRcProtocolAdapter
+from protocols.cooingdv_video_protocol import CooingdvVideoProtocolAdapter
 from plugins.manager import PluginManager
 from utils.dropping_queue import DroppingQueue
 
@@ -70,23 +75,43 @@ class ConnectionManager:
                 except Exception:
                     self.disconnect(connection)
 
-# Load environment variables
-dotenv.load_dotenv()
-
 # Feature flags
 PLUGINS_ENABLED = os.getenv("PLUGINS_ENABLED", "false").lower() in ("1", "true", "yes", "on")
 
-# Basic logging configuration (industry-standard: Python stdlib logging).
-# Set LOG_LEVEL=DEBUG to see verbose control-loop logs.
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 # Managers for WebSocket connections
 overlay_manager = ConnectionManager()
 video_manager = ConnectionManager()
+
+
+def _control_capabilities_for_drone(drone_type: str) -> dict[str, bool]:
+    """
+    Describe which one-shot commands the active implementation exposes.
+
+    These capabilities let the frontend keep its control cluster honest instead
+    of assuming every implementation supports the same actions.
+    """
+    if drone_type in {"s2x", "wifi_uav", "cooingdv"}:
+        return {
+            "takeoff": True,
+            "land": True,
+            "estop": True,
+        }
+
+    if drone_type == "debug":
+        return {
+            "takeoff": True,
+            "land": True,
+            "estop": False,
+        }
+
+    return {
+        "takeoff": False,
+        "land": False,
+        "estop": False,
+    }
 
 class FrameHub:
     """
@@ -135,9 +160,11 @@ FRAME_HUB = FrameHub(per_client_queue_size=2)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global flight_controller, receiver, plugin_manager
+    global flight_controller, receiver, plugin_manager, active_drone_type, control_capabilities
 
     drone_type = os.getenv("DRONE_TYPE", "s2x").lower()
+    active_drone_type = drone_type
+    control_capabilities = _control_capabilities_for_drone(drone_type)
     
     logger.info("[main] Using drone type: %s", drone_type)
 
@@ -147,6 +174,7 @@ async def lifespan(app: FastAPI):
         default_ip = "172.16.10.1"
         default_ctrl_port = 8080
         default_video_port = 8888
+        default_control_rate = 80.0
 
         drone_ip = os.getenv("DRONE_IP", default_ip)
         ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
@@ -173,6 +201,7 @@ async def lifespan(app: FastAPI):
         default_ip = "192.168.169.1"
         default_ctrl_port = 8800
         default_video_port = 8800
+        default_control_rate = 80.0
 
         drone_ip = os.getenv("DRONE_IP", default_ip)
         ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
@@ -187,8 +216,28 @@ async def lifespan(app: FastAPI):
             "video_port": video_port,
             "debug": False,
         }
+    elif drone_type == "cooingdv":
+        logger.info("[main] Using Cooingdv drone implementation (RC UFO, KY UFO, E88 Pro).")
+        default_ip = "192.168.1.1"
+        default_ctrl_port = 7099
+        default_video_port = 7070  # RTSP port
+        default_control_rate = 20.0
+
+        drone_ip = os.getenv("DRONE_IP", default_ip)
+        ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
+        video_port = int(os.getenv("VIDEO_PORT", default_video_port))
+
+        model = CooingdvRcModel()
+        rc_proto = CooingdvRcProtocolAdapter(drone_ip, ctrl_port)
+        video_adapter_cls = CooingdvVideoProtocolAdapter
+        video_adapter_args = {
+            "drone_ip": drone_ip,
+            "control_port": ctrl_port,
+            "video_port": video_port,
+        }
     elif drone_type == "debug":
         logger.info("[main] Using debug drone implementation.")
+        default_control_rate = 80.0
         model = DebugRcModel()
         rc_proto = DebugRcProtocolAdapter()
         video_adapter_cls = DebugVideoProtocolAdapter
@@ -223,7 +272,12 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    flight_controller = FlightController(model, rc_proto)
+    try:
+        control_rate = float(os.getenv("CONTROL_RATE", default_control_rate))
+    except (TypeError, ValueError):
+        control_rate = default_control_rate
+
+    flight_controller = FlightController(model, rc_proto, control_rate)
     flight_controller.start()
 
     # 3. Plugins (optional)
@@ -290,12 +344,22 @@ RAW_Q: queue.Queue = DroppingQueue(maxsize=2)          # thread-safe → pump
 flight_controller: Optional[FlightController] = None
 receiver: Optional[VideoReceiverService] = None
 plugin_manager: Optional[PluginManager] = None
+active_drone_type = os.getenv("DRONE_TYPE", "s2x").lower()
+control_capabilities = _control_capabilities_for_drone(active_drone_type)
 
 video_keepalive = None  # legacy; no longer used
 
 # ───────────────────────────────────────────────────────────────
 # Plugin Management
 # ───────────────────────────────────────────────────────────────
+@app.get("/capabilities")
+async def get_capabilities():
+    return {
+        "drone_type": active_drone_type,
+        "commands": control_capabilities,
+    }
+
+
 @app.get("/plugins")
 async def get_plugins():
     if not PLUGINS_ENABLED:
@@ -415,6 +479,14 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     flight_controller.model.land()
                 except Exception:
                     pass
+            elif msg_type in ("estop", "emergency_stop"):
+                try:
+                    flight_controller.model.emergency_stop()
+                except Exception:
+                    try:
+                        flight_controller.model.stop_flag = True
+                    except Exception:
+                        pass
     except WebSocketDisconnect:
         logger.info("[WebSocket] Client disconnected")
     except Exception as e:

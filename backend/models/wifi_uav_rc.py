@@ -59,7 +59,12 @@ class WifiUavRcModel(BaseRCModel):
         self.takeoff_flag = True
 
     def land(self):
+        """Request the app's normal land / descend action."""
         self.land_flag = True
+
+    def emergency_stop(self):
+        """Immediate motor stop, distinct from the normal land action."""
+        self.stop_flag = True
 
     # unsupported – always returns 0
     def toggle_record(self):             # type: ignore[override]
@@ -76,75 +81,3 @@ class WifiUavRcModel(BaseRCModel):
 
     def set_strategy(self, strategy) -> None:
         self.strategy = strategy
-
-    # ------------------------------------------------------------------ #
-    # helpers – same incremental stick logic as the S2x model
-    # ------------------------------------------------------------------ #
-    def _update_axes_incremental(self, dt, axes):
-        self.update_axes(
-            dt,
-            axes.get("throttle", 0),
-            axes.get("yaw", 0),
-            axes.get("pitch", 0),
-            axes.get("roll", 0),
-        )
-
-    def update_axes(self, dt, throttle_dir, yaw_dir, pitch_dir, roll_dir):
-        """
-        Blend acceleration / deceleration with an 'immediate jump' when the
-        pilot suddenly changes direction, identical to the S2x implementation.
-        """
-        for attr, direction, boost_enabled in (
-            ('throttle', throttle_dir, False),
-            ('yaw',      yaw_dir,      False),
-            ('pitch',    pitch_dir,    True),
-            ('roll',     roll_dir,     True),
-        ):
-            cur = getattr(self, attr)
-            last_dir_attr = f"last_{attr}_dir"
-            last_dir = getattr(self, last_dir_attr)
-
-            if direction > 0:
-                if boost_enabled and last_dir <= 0:
-                    cur += min(
-                        self.max_control_value - cur, self.immediate_response
-                    )
-                dist = self.max_control_value - cur
-                accel = self.accel_rate * dt * (
-                    1 + self.expo_factor * dist /
-                    (self.max_control_value - self.center_value)
-                )
-                new = min(self.max_control_value, cur + accel)
-
-            elif direction < 0:
-                if boost_enabled and last_dir >= 0:
-                    cur -= min(
-                        cur - self.min_control_value, self.immediate_response
-                    )
-                dist = cur - self.min_control_value
-                accel = self.accel_rate * dt * (
-                    1 + self.expo_factor * dist /
-                    (self.center_value - self.min_control_value)
-                )
-                new = max(self.min_control_value, cur - accel)
-
-            else:   # return to centre
-                if cur > self.center_value:
-                    dist = cur - self.center_value
-                    decel = self.decel_rate * dt * (
-                        1 + 0.5 * dist /
-                        (self.max_control_value - self.center_value)
-                    )
-                    new = max(self.center_value, cur - decel)
-                elif cur < self.center_value:
-                    dist = self.center_value - cur
-                    decel = self.decel_rate * dt * (
-                        1 + 0.5 * dist /
-                        (self.center_value - self.min_control_value)
-                    )
-                    new = min(self.center_value, cur + decel)
-                else:
-                    new = cur
-
-            setattr(self, attr, new)
-            setattr(self, last_dir_attr, direction)

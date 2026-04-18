@@ -96,9 +96,78 @@ class BaseRCModel(ABC):
             return self.center_value + value * (self.max_control_value - self.center_value)
         return self.center_value + value * (self.center_value - self.min_control_value)
 
-    def _update_axes_incremental(self, dt, dirs):
-        # original WASD accel/decel code here (uses self.profile)
-        ...
+    def _update_axes_incremental(self, dt, axes):
+        self.update_axes(
+            dt,
+            axes.get("throttle", 0),
+            axes.get("yaw", 0),
+            axes.get("pitch", 0),
+            axes.get("roll", 0),
+        )
+
+    def update_axes(self, dt, throttle_dir, yaw_dir, pitch_dir, roll_dir):
+        """
+        Apply the shared incremental stick logic used by keyboard-style controls.
+
+        Pitch and roll get a small immediate boost when the pilot reverses
+        direction so the craft feels less sluggish during lateral movement.
+        """
+        for attr, direction, boost_enabled in (
+            ("throttle", throttle_dir, False),
+            ("yaw", yaw_dir, False),
+            ("pitch", pitch_dir, True),
+            ("roll", roll_dir, True),
+        ):
+            cur = getattr(self, attr)
+            last_dir_attr = f"last_{attr}_dir"
+            last_dir = getattr(self, last_dir_attr, 0)
+
+            if direction > 0:
+                if boost_enabled and last_dir <= 0:
+                    cur += min(
+                        self.max_control_value - cur,
+                        self.immediate_response,
+                    )
+                dist = self.max_control_value - cur
+                accel = self.accel_rate * dt * (
+                    1 + self.expo_factor * dist
+                    / (self.max_control_value - self.center_value)
+                )
+                new = min(self.max_control_value, cur + accel)
+
+            elif direction < 0:
+                if boost_enabled and last_dir >= 0:
+                    cur -= min(
+                        cur - self.min_control_value,
+                        self.immediate_response,
+                    )
+                dist = cur - self.min_control_value
+                accel = self.accel_rate * dt * (
+                    1 + self.expo_factor * dist
+                    / (self.center_value - self.min_control_value)
+                )
+                new = max(self.min_control_value, cur - accel)
+
+            else:
+                if cur > self.center_value:
+                    dist = cur - self.center_value
+                    decel = self.decel_rate * dt * (
+                        1 + 0.5 * dist
+                        / (self.max_control_value - self.center_value)
+                    )
+                    new = max(self.center_value, cur - decel)
+                elif cur < self.center_value:
+                    dist = self.center_value - cur
+                    decel = self.decel_rate * dt * (
+                        1 + 0.5 * dist
+                        / (self.center_value - self.min_control_value)
+                    )
+                    new = min(self.center_value, cur + decel)
+                else:
+                    new = cur
+
+            setattr(self, attr, new)
+            setattr(self, last_dir_attr, direction)
 
     def _update_axes_direct(self, axes):
         expo = getattr(self, "expo_factor", 0.0)
