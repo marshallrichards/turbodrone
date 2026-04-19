@@ -11,8 +11,8 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
 
     | Brand      | Model Number(s)    | Compatibility | Purchase Link                                               | Notes |
     |------------|-----------------|---------------|-------------------------------------------------------------|-------|
-    | Karuisrc | K417 | Tested | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | My favorite right now. Only one currently supported that has brushless motors! Build quality is fantastic. |
-    | Generic   | M10 | Tested |  [Aliexpress](https://www.aliexpress.us/item/3256809708895605.html) | Another great brushless motor drone |
+    | Karuisrc | K417 | Tested | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | First model to be supported with brushless motors. Build quality is great. |
+    | Generic   | M10 | Tested |  [Aliexpress](https://www.aliexpress.us/item/3256809708895605.html) | My current favorite. Brushless motors. RTSP video stream is very reliable. |
     | Loiley     | S29             | Tested    | Can't find link anymore | Great build quality, has servo for tilting camera(_not implemented in API yet_)|
     | Hiturbo    | S20             | Tested    | [Amazon](https://www.amazon.com/dp/B0BBVZ849G), [Alternate Amazon Listing](https://www.amazon.com/Beginners-Foldable-Quadcopter-Gestures-Batteries/dp/B0D8LK1KJ3)                  | Original test platform, great build quality|
     | FlyVista | V88 | Tested | [Amazon](https://www.amazon.com/dp/B0D5CXY6X8) | |
