@@ -31,6 +31,7 @@ from protocols.cooingdv_rc_protocol_adapter import CooingdvRcProtocolAdapter
 from protocols.cooingdv_video_protocol import CooingdvVideoProtocolAdapter
 from plugins.manager import PluginManager
 from utils.dropping_queue import DroppingQueue
+from utils.wifi_uav_variants import WIFI_UAV_DRONE_TYPES, resolve_wifi_uav_variant
 
 
 class ConnectionManager:
@@ -93,7 +94,7 @@ def _control_capabilities_for_drone(drone_type: str) -> dict[str, bool]:
     These capabilities let the frontend keep its control cluster honest instead
     of assuming every implementation supports the same actions.
     """
-    if drone_type in {"s2x", "wifi_uav", "cooingdv"}:
+    if drone_type in {"s2x", "cooingdv"} or drone_type in WIFI_UAV_DRONE_TYPES:
         return {
             "takeoff": True,
             "land": True,
@@ -195,8 +196,9 @@ async def lifespan(app: FastAPI):
             "control_port": ctrl_port,
             "video_port": video_port,
         }
-    elif drone_type == "wifi_uav":
-        logger.info("[main] Using WiFi UAV drone implementation.")
+    elif drone_type in WIFI_UAV_DRONE_TYPES:
+        wifi_uav_variant = resolve_wifi_uav_variant(drone_type)
+        logger.info("[main] Using WiFi UAV drone implementation (variant=%s).", wifi_uav_variant)
         # Align with previous working setup: env-configurable IP and ports
         default_ip = "192.168.169.1"
         default_ctrl_port = 8800
@@ -208,12 +210,13 @@ async def lifespan(app: FastAPI):
         video_port = int(os.getenv("VIDEO_PORT", default_video_port))
 
         model = WifiUavRcModel()
-        rc_proto = WifiUavRcProtocolAdapter(drone_ip, ctrl_port)
+        rc_proto = WifiUavRcProtocolAdapter(drone_ip, ctrl_port, variant=wifi_uav_variant)
         video_adapter_cls = WifiUavVideoProtocolAdapter
         video_adapter_args = {
             "drone_ip": drone_ip,
             "control_port": ctrl_port,
             "video_port": video_port,
+            "variant": wifi_uav_variant,
             "debug": False,
         }
     elif drone_type == "cooingdv":
@@ -251,7 +254,7 @@ async def lifespan(app: FastAPI):
         "protocol_adapter_args": video_adapter_args,
         "frame_queue": RAW_Q,
     }
-    if drone_type == "wifi_uav":
+    if drone_type in WIFI_UAV_DRONE_TYPES:
         video_service_args["rc_adapter"] = rc_proto
     
     receiver = VideoReceiverService(**video_service_args)

@@ -50,9 +50,12 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
     def __init__(self,
                  drone_ip: str = DEFAULT_DRONE_IP,
                  control_port: int = DEFAULT_PORT,
-                 shared_sock: Optional[socket.socket] = None) -> None:
+                 shared_sock: Optional[socket.socket] = None,
+                 variant: str = "auto") -> None:
         self.drone_ip = drone_ip
         self.control_port = control_port
+        self.variant = (variant or "auto").strip().lower()
+        self._target_ports = self._resolve_target_ports(control_port)
 
         self.sock = shared_sock or socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._is_shared_sock = shared_sock is not None
@@ -157,7 +160,8 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         hands us the fresh socket.
         """
         try:
-            self.sock.sendto(packet, (self.drone_ip, self.control_port))
+            for port in self._target_ports:
+                self.sock.sendto(packet, (self.drone_ip, port))
         except OSError:
             # Socket was closed during video-reconnect window.
             # Wait for VideoReceiverService to call set_socket(…) with the
@@ -193,3 +197,8 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         state = "ON" if self.debug_packets else "OFF"
         print(f"[wifi-uav] debug {state}")
         return self.debug_packets
+
+    def _resolve_target_ports(self, control_port: int) -> tuple[int, ...]:
+        if self.variant == "uav":
+            return (control_port, control_port + 1)
+        return (control_port,)
