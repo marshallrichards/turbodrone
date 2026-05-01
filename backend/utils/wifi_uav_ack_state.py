@@ -52,6 +52,10 @@ class WifiUavFrameSlot:
             self.frame_body_len = frame_body_len
             self.quality = quality
             self.status = SLOT_RECEIVING
+        elif fragment_total > 0:
+            self.fragment_total = fragment_total
+            self.frame_body_len = frame_body_len
+            self.quality = quality
 
         self.fragments[fragment_id] = payload
         self.received_fragments.add(fragment_id)
@@ -141,7 +145,7 @@ class WifiUavAckState:
         if slot.seq != seq:
             slot.reset(seq, fragment_total, frame_body_len, quality)
 
-        if fragment_total <= 0 or fragment_id >= fragment_total:
+        if fragment_total > 0 and fragment_id >= fragment_total:
             return None
 
         self.max_recv_seq = max(self.max_recv_seq, seq)

@@ -65,6 +65,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self._pkt_lock = threading.Lock()
         self._pkt_buffer: list[bytes] = []
         self._warmup_stop = threading.Event()
+        self._warmup_thread: Optional[threading.Thread] = None
+        self._rx_thread: Optional[threading.Thread] = None
         self._target_ports = self._resolve_target_ports(control_port)
 
         self._sock = self._create_duplex_socket()
@@ -162,11 +164,18 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self._dbg(f"← FID:{frame_id:04x} FRAG:{frag_id:04x}")
 
         if slot is None:
-            missing = fragment_total - len(self._ack_state._slot_for_seq(frame_id).received_fragments)
-            self._dbg(
-                f"⚠ incomplete FID:{frame_id:04x} "
-                f"missing {missing} fragment(s); waiting for retry"
-            )
+            received = len(self._ack_state._slot_for_seq(frame_id).received_fragments)
+            if fragment_total > 0:
+                missing = fragment_total - received
+                self._dbg(
+                    f"⚠ incomplete FID:{frame_id:04x} "
+                    f"missing {missing} fragment(s); waiting for retry"
+                )
+            else:
+                self._dbg(
+                    f"⚠ incomplete FID:{frame_id:04x} "
+                    f"received {received} fragment(s); waiting for tail"
+                )
             return None
 
         # Only emit a frame once every fragment up to the announced tail exists.
@@ -243,7 +252,8 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         # 16-bit counters and inferred the last fragment from packet length.
         frame_id = int.from_bytes(payload[16:18], "little")
         frag_id = int.from_bytes(payload[32:34], "little")
-        fragment_total = frag_id + 1 if payload[2] != 0x38 else frag_id + 2
+        # Legacy packets only reveal the total when the tail fragment arrives.
+        fragment_total = frag_id + 1 if payload[2] != 0x38 else 0
         return frame_id, frag_id, fragment_total, 0, 0, payload[56:]
 
     def _resolve_target_ports(self, control_port: int) -> tuple[int, ...]:
@@ -394,7 +404,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
             if self._retry_cnt < self.MAX_RETRIES:
                 self._dbg(f"⚠ timeout FID {self._current_fid:04x} – retry "
                           f"({self._retry_cnt +1}/{self.MAX_RETRIES})")
-                self._send_frame_request((self._current_fid - 1) & 0xFFFF)
+                self._send_frame_request(max(0, self._current_fid - 1))
                 self._retry_cnt += 1
                 self.retry_attempts += 1
                 self._had_retry = True
@@ -415,16 +425,16 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self._running = False
         self._first_frame = False
         self._warmup_stop.set()
+        for thread in (self._warmup_thread, self._watchdog, self._rx_thread):
+            try:
+                if thread and thread.is_alive():
+                    thread.join(timeout=0.5)
+            except Exception as e:
+                self._dbg(f"Ignoring thread shutdown error: {e}")
         try:
-            if self._warmup_thread and self._warmup_thread.is_alive():
-                self._warmup_thread.join(timeout=0.5)
-            if self._watchdog and self._watchdog.is_alive():
-                self._watchdog.join(timeout=0.5)
-            if hasattr(self, "_rx_thread") and self._rx_thread and self._rx_thread.is_alive():
-                self._rx_thread.join(timeout=0.5)
             self._sock.close()
         except Exception as e:
-            self._dbg(f"Ignoring error during shutdown: {e}")
+            self._dbg(f"Ignoring socket shutdown error: {e}")
 
         self._dbg(
             f"[stats] ok:{self.frames_ok}  dropped:{self.frames_dropped}  "
