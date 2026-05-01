@@ -3,14 +3,13 @@ import socket
 import queue
 import threading
 import time
-from typing import Dict, Optional
+from typing import Optional
 
 from models.video_frame import VideoFrame
 from protocols.base_video_protocol import BaseVideoProtocolAdapter
+from utils.wifi_uav_ack_state import WifiUavAckState
 from utils.wifi_uav_packets import (
     START_STREAM,
-    build_ack_slot,
-    build_fragment_ack_bitmap,
     build_native_ack_packet,
 )
 from utils.wifi_uav_jpeg import generate_jpeg_headers, EOI
@@ -76,14 +75,11 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         # State for the current frame being assembled
         # If I send 0 it sends 1, starting with 1 is more reliable.
         self._current_fid: int = 1
-        self._fragments: Dict[int, bytes] = {}     # frag_id -> payload
-        self._expected_fragments: Optional[int] = None
-        self._pending_ack_frame_id: Optional[int] = None
-        self._pending_ack_fragment_total: Optional[int] = None
-        self._pending_ack_received_fragments: set[int] = set()
+        self._ack_state = WifiUavAckState()
         self._last_req_ts = time.time()
         self._last_rx_ts = time.time()
         self._stream_started = False
+        self._started_once = False
 
         # Stats
         self.frames_ok = 0
@@ -91,14 +87,6 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self._dbg(f"[init] adapter ready (control:{control_port}  video:{video_port})")
         if self.variant == "uav":
             logger.info("[wifi-uav] UAV/FLOW variant selected; probing UDP ports %s", self._target_ports)
-
-        # Kick-off the stream and ask for the first frame
-        self.send_start_command()
-        self._send_frame_request(0) # Request frame 0 to get frame 1
-        # During warmup, resend until we see the first frame
-        self._first_frame = True
-        self._warmup_thread = threading.Thread(target=self._warmup_loop, daemon=True, name="Warmup")
-        self._warmup_thread.start()
 
         # Watchdog for per-frame timeouts
         self._running = True
@@ -151,7 +139,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         if parsed is None:
             return None
 
-        frame_id, frag_id, fragment_total, jpeg_payload = parsed
+        frame_id, frag_id, fragment_total, frame_body_len, quality, jpeg_payload = parsed
         self._stream_started = True
         self._last_rx_ts = time.time()
         self._retry_cnt = 0
@@ -161,31 +149,28 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
             self.frames_dropped += 1
             self._dbg(f"⚠ skip   expected {self._current_fid:04x} "
                       f"got {frame_id:04x}")
-            self._fragments.clear()
-            self._expected_fragments = None
             self._current_fid = frame_id
 
-        self._expected_fragments = fragment_total
-        self._pending_ack_frame_id = frame_id
-        self._pending_ack_fragment_total = fragment_total
-        self._pending_ack_received_fragments.add(frag_id)
-
-        # Retries can resend a fragment; keep the latest copy so a repaired
-        # fragment can replace an earlier bad or incomplete one.
-        self._fragments[frag_id] = jpeg_payload
+        slot = self._ack_state.ingest_fragment(
+            frame_id,
+            frag_id,
+            fragment_total,
+            jpeg_payload,
+            frame_body_len=frame_body_len,
+            quality=quality,
+        )
         self._dbg(f"← FID:{frame_id:04x} FRAG:{frag_id:04x}")
 
-        missing = [i for i in range(self._expected_fragments) if i not in self._fragments]
-        if missing:
+        if slot is None:
+            missing = fragment_total - len(self._ack_state._slot_for_seq(frame_id).received_fragments)
             self._dbg(
                 f"⚠ incomplete FID:{frame_id:04x} "
-                f"missing {len(missing)} fragment(s); waiting for retry"
+                f"missing {missing} fragment(s); waiting for retry"
             )
             return None
 
         # Only emit a frame once every fragment up to the announced tail exists.
-        ordered = [self._fragments[i] for i in range(self._expected_fragments)]
-        jpeg = self._jpeg_header + b"".join(ordered) + EOI
+        jpeg = self._jpeg_header + slot.ordered_payload() + EOI
         frame = VideoFrame(frame_id=frame_id, data=jpeg)
 
         self.frames_ok += 1
@@ -199,15 +184,11 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
             self._had_retry = False
         # ──────────────────────────────────────────────────────────────
 
-        self._dbg(f"✓ {frame_id:04x} ({len(self._fragments)} frags)  "
+        self._dbg(f"✓ {frame_id:04x} ({slot.fragment_total} frags)  "
                   f"OK:{self.frames_ok}  DROP:{self.frames_dropped}")
 
         # prepare next iteration
-        self._fragments.clear()
-        self._expected_fragments = None
-        self._pending_ack_frame_id = None
-        self._pending_ack_fragment_total = None
-        self._pending_ack_received_fragments.clear()
+        self._ack_state.mark_delivered(frame_id)
         self._send_frame_request(frame_id)            # ask for next
         self._current_fid = frame_id + 1
         self._last_rx_ts = self._last_req_ts = time.time()
@@ -224,7 +205,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
             try:
                 self.send_start_command()
                 # Ask for the previous frame id; the drone will respond with next
-                self._send_frame_request((self._current_fid - 1) & 0xFFFF)
+                self._send_frame_request(max(0, self._current_fid - 1))
             except Exception:
                 pass
             self._warmup_stop.wait(0.2)
@@ -241,28 +222,9 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self._dbg("→ REQ %04x to %s", frame_id, self._target_ports)
 
     def _build_ack_slots(self, seq: int) -> list[bytes]:
-        if (
-            self._pending_ack_frame_id is not None
-            and self._pending_ack_fragment_total
-            and self._pending_ack_received_fragments
-        ):
-            bitmap = build_fragment_ack_bitmap(
-                self._pending_ack_fragment_total,
-                self._pending_ack_received_fragments,
-            )
-            return [
-                build_ack_slot(self._pending_ack_frame_id, 0, bitmap),
-                build_ack_slot((self._pending_ack_frame_id + 4) & 0xFFFFFFFFFFFFFFFF, 3),
-            ]
+        return self._ack_state.build_ack_slots(seq)
 
-        # Native `build_send_ack()` emits a status=1 slot followed by a status=3
-        # future/request slot in the common steady-state request pattern.
-        return [
-            build_ack_slot(seq, 1, b"\xff\xff\xff\xff"),
-            build_ack_slot(seq, 3),
-        ]
-
-    def _parse_fragment_header(self, payload: bytes) -> Optional[tuple[int, int, int, bytes]]:
+    def _parse_fragment_header(self, payload: bytes) -> Optional[tuple[int, int, int, int, int, bytes]]:
         if len(payload) < 56 or payload[0] != 0x93 or payload[1] != 0x01:
             return None
 
@@ -272,15 +234,17 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
             frame_id = int.from_bytes(payload[8:16], "little")
             frag_id = int.from_bytes(payload[32:36], "little")
             fragment_total = int.from_bytes(payload[36:40], "little")
+            frame_body_len = int.from_bytes(payload[40:44], "little")
+            quality = payload[48]
             if fragment_total > 0 and frag_id < fragment_total:
-                return frame_id, frag_id, fragment_total, payload[56:]
+                return frame_id, frag_id, fragment_total, frame_body_len, quality, payload[56:]
 
         # Compatibility fallback for older captures/comments that only used
         # 16-bit counters and inferred the last fragment from packet length.
         frame_id = int.from_bytes(payload[16:18], "little")
         frag_id = int.from_bytes(payload[32:34], "little")
         fragment_total = frag_id + 1 if payload[2] != 0x38 else frag_id + 2
-        return frame_id, frag_id, fragment_total, payload[56:]
+        return frame_id, frag_id, fragment_total, 0, 0, payload[56:]
 
     def _resolve_target_ports(self, control_port: int) -> tuple[int, ...]:
         """
@@ -354,6 +318,21 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self._rx_thread = threading.Thread(target=_rx_loop, daemon=True, name="WifiUavVideoRx")
         self._rx_thread.start()
 
+        if not self._started_once:
+            self._started_once = True
+            # Kick off the stream only after the receiver is already draining
+            # the UDP socket. K417 responds very quickly and can otherwise dump
+            # the first frame burst before the RX loop is active.
+            self.send_start_command()
+            self._send_frame_request(0)
+            self._first_frame = True
+            self._warmup_thread = threading.Thread(
+                target=self._warmup_loop,
+                daemon=True,
+                name="Warmup",
+            )
+            self._warmup_thread.start()
+
     def is_running(self) -> bool:
         rx_thread = getattr(self, "_rx_thread", None)
         if not (self._running and rx_thread and rx_thread.is_alive()):
@@ -424,12 +403,10 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
                 self._dbg(f"✗ drop   FID {self._current_fid:04x} "
                           f"(after {self._retry_cnt} retries)  "
                           f"OK:{self.frames_ok}  DROP:{self.frames_dropped}")
-
-                self._fragments.clear()
-                self._expected_fragments = None
+                self._ack_state.mark_dropped(self._current_fid)
                 self._retry_cnt  = 0
-                self._current_fid = (self._current_fid + 1) & 0xFFFF
-                self._send_frame_request((self._current_fid - 1) & 0xFFFF)
+                self._current_fid += 1
+                self._send_frame_request(max(0, self._current_fid - 1))
                 self._had_retry = False
 
     def stop(self) -> None:

@@ -13,7 +13,7 @@ WIFI_UAV_DRONE_TYPES: Final[frozenset[str]] = frozenset({
 })
 
 _UAV_PREFIXES: Final[tuple[str, ...]] = ("flow_", "flow-", "flow")
-_FLD_PREFIXES: Final[tuple[str, ...]] = ("wifi_", "gd89pro_", "wtech-", "wtech_")
+_FLD_PREFIXES: Final[tuple[str, ...]] = ("wifi_", "gd89pro_", "wtech-", "wtech_", "drone_")
 
 
 def wifi_uav_variant_from_drone_type(drone_type: str) -> str:

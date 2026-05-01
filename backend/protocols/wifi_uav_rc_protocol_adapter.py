@@ -10,9 +10,9 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
     Builds and transmits control packets for the WiFi-UAV family.
     Packet layout derived from reverse-engineered Android app traces.
 
-    The decompiled WiFi-UAV app exposes separate land and emergency-stop
-    controls. We preserve that distinction in the command byte here instead of
-    collapsing both actions into the same value.
+    Turbodrone uses the extended WiFi-UAV command layout (`66 14 ...`). In
+    that layout the app maps takeoff and land onto the same one-key action bit,
+    while emergency stop is a separate bit.
     """
 
     DEFAULT_DRONE_IP: Final = "192.168.169.1"
@@ -41,10 +41,9 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         0x00, 0x00
     ])
 
-    FLAG_TAKEOFF = 0x01
-    FLAG_LAND = 0x02
-    FLAG_STOP = 0x04
-    FLAG_CALIBRATION = 0x80
+    FLAG_TAKEOFF_OR_LAND = 0x01
+    FLAG_STOP = 0x02
+    FLAG_CALIBRATION = 0x04
 
     # ------------------------------------------------------------------ #
     def __init__(self,
@@ -100,10 +99,18 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
 
         # ----- command / headless --------------------------------------
         command = 0x00
-        if drone_model.takeoff_flag:
-            command |= self.FLAG_TAKEOFF
+        if drone_model.takeoff_flag or drone_model.land_flag:
+            command |= self.FLAG_TAKEOFF_OR_LAND
         if drone_model.land_flag:
-            command |= self.FLAG_LAND
+            self._last_command_intent = "LAND"
+        elif drone_model.takeoff_flag:
+            self._last_command_intent = "TAKEOFF"
+        elif drone_model.stop_flag:
+            self._last_command_intent = "STOP"
+        elif drone_model.calibration_flag:
+            self._last_command_intent = "CALIBRATE"
+        else:
+            self._last_command_intent = None
         if drone_model.stop_flag:
             command |= self.FLAG_STOP
         if drone_model.calibration_flag:
@@ -179,10 +186,8 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
                 command = getattr(self, "_last_command", None)
                 if command is not None:
                     flags = []
-                    if command & self.FLAG_TAKEOFF:
-                        flags.append("TAKEOFF")
-                    if command & self.FLAG_LAND:
-                        flags.append("LAND")
+                    if command & self.FLAG_TAKEOFF_OR_LAND:
+                        flags.append(getattr(self, "_last_command_intent", None) or "TAKEOFF_OR_LAND")
                     if command & self.FLAG_STOP:
                         flags.append("STOP")
                     if command & self.FLAG_CALIBRATION:
