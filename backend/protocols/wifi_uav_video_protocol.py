@@ -297,6 +297,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
             return
         # Small frame buffer; upstream will drop if slow
         self._frame_q: "queue.Queue[VideoFrame]" = queue.Queue(maxsize=2)
+        self._last_rx_ts = time.time()
         with self._pkt_lock:
             self._pkt_buffer = []
 
@@ -352,7 +353,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         if self._stream_started:
             return (now - self._last_rx_ts) < self.LINK_STALL_TIMEOUT
 
-        return (now - self._last_req_ts) < self.INITIAL_STREAM_TIMEOUT
+        return (now - self._last_rx_ts) < self.INITIAL_STREAM_TIMEOUT
 
     def get_frame(self, timeout: float = 1.0) -> Optional[VideoFrame]:
         try:
