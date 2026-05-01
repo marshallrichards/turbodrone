@@ -26,6 +26,7 @@ from protocols.cooingdv_video_protocol import CooingdvVideoProtocolAdapter
 
 from services.flight_controller import FlightController
 from services.video_receiver import VideoReceiverService
+from utils.wifi_uav_variants import WIFI_UAV_DRONE_TYPES, resolve_wifi_uav_variant
 from views.cli_rc import CLIView
 from views.opencv_video_view import OpenCVVideoView
 
@@ -36,8 +37,8 @@ logger = logging.getLogger(__name__)
 def main():
     parser = argparse.ArgumentParser(description="Drone teleoperation interface")
     parser.add_argument("--drone-type", type=str, default="s2x", 
-                        choices=["s2x", "wifi_uav", "cooingdv"],
-                        help="Type of drone to control (s2x, wifi_uav, or cooingdv, default: s2x)")
+                        choices=["s2x", "wifi_uav", "wifi_uav_fld", "wifi_uav_uav", "cooingdv"],
+                        help="Type of drone to control (s2x, wifi_uav, wifi_uav_fld, wifi_uav_uav, or cooingdv, default: s2x)")
     parser.add_argument("--drone-ip", type=str,
                         help="Drone UDP IP address (default: s2x=172.16.10.1, wifi_uav=192.168.169.1, cooingdv=192.168.1.1)")
     parser.add_argument("--control-port", type=int,
@@ -69,8 +70,9 @@ def main():
         drone_model = S2xDroneModel()
         protocol_adapter = S2xRCProtocolAdapter(drone_ip, control_port)
         video_protocol_adapter_class = S2xVideoProtocolAdapter
-    elif args.drone_type == "wifi_uav":
-        logger.info("[main] Using WiFi UAV drone implementation.")
+    elif args.drone_type in WIFI_UAV_DRONE_TYPES:
+        wifi_uav_variant = resolve_wifi_uav_variant(args.drone_type)
+        logger.info("[main] Using WiFi UAV drone implementation (variant=%s).", wifi_uav_variant)
         default_ip = "192.168.169.1"
         default_control_port = 8800
         default_video_port = 8800 # For WifiUAV, control and video often use the same port
@@ -81,7 +83,7 @@ def main():
         video_port = args.video_port if args.video_port else default_video_port
 
         drone_model = WifiUavRcModel()
-        protocol_adapter = WifiUavRcProtocolAdapter(drone_ip, control_port)
+        protocol_adapter = WifiUavRcProtocolAdapter(drone_ip, control_port, variant=wifi_uav_variant)
         video_protocol_adapter_class = WifiUavVideoProtocolAdapter
     elif args.drone_type == "cooingdv":
         logger.info("[main] Using Cooingdv drone implementation (RC UFO, KY UFO, E88 Pro).")
@@ -121,11 +123,12 @@ def main():
                 "control_port": control_port,
                 "video_port": video_port
             }
-        elif args.drone_type == "wifi_uav":
+        elif args.drone_type in WIFI_UAV_DRONE_TYPES:
             video_protocol_args = {
                 "drone_ip": drone_ip,
                 "control_port": control_port,
-                "video_port": video_port
+                "video_port": video_port,
+                "variant": wifi_uav_variant,
             }
         elif args.drone_type == "cooingdv":
             video_protocol_args = {
@@ -140,7 +143,8 @@ def main():
             video_protocol_args,          # The arguments for it
             frame_queue,
             dump_frames=args.dump_frames,
-            dump_packets=args.dump_packets
+            dump_packets=args.dump_packets,
+            rc_adapter=protocol_adapter if args.drone_type in WIFI_UAV_DRONE_TYPES else None,
         )
         video_view = OpenCVVideoView(frame_queue)
         

@@ -10,9 +10,9 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
     Builds and transmits control packets for the WiFi-UAV family.
     Packet layout derived from reverse-engineered Android app traces.
 
-    The decompiled WiFi-UAV app exposes separate land and emergency-stop
-    controls. We preserve that distinction in the command byte here instead of
-    collapsing both actions into the same value.
+    Turbodrone uses the extended WiFi-UAV command layout (`66 14 ...`). In
+    that layout the app maps takeoff and land onto the same one-key action bit,
+    while emergency stop is a separate bit.
     """
 
     DEFAULT_DRONE_IP: Final = "192.168.169.1"
@@ -41,18 +41,20 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         0x00, 0x00
     ])
 
-    FLAG_TAKEOFF = 0x01
-    FLAG_LAND = 0x02
-    FLAG_STOP = 0x04
-    FLAG_CALIBRATION = 0x80
+    FLAG_TAKEOFF_OR_LAND = 0x01
+    FLAG_STOP = 0x02
+    FLAG_CALIBRATION = 0x04
 
     # ------------------------------------------------------------------ #
     def __init__(self,
                  drone_ip: str = DEFAULT_DRONE_IP,
                  control_port: int = DEFAULT_PORT,
-                 shared_sock: Optional[socket.socket] = None) -> None:
+                 shared_sock: Optional[socket.socket] = None,
+                 variant: str = "auto") -> None:
         self.drone_ip = drone_ip
         self.control_port = control_port
+        self.variant = (variant or "auto").strip().lower()
+        self._target_ports = self._resolve_target_ports(control_port)
 
         self.sock = shared_sock or socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._is_shared_sock = shared_sock is not None
@@ -97,10 +99,18 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
 
         # ----- command / headless --------------------------------------
         command = 0x00
-        if drone_model.takeoff_flag:
-            command |= self.FLAG_TAKEOFF
+        if drone_model.takeoff_flag or drone_model.land_flag:
+            command |= self.FLAG_TAKEOFF_OR_LAND
         if drone_model.land_flag:
-            command |= self.FLAG_LAND
+            self._last_command_intent = "LAND"
+        elif drone_model.takeoff_flag:
+            self._last_command_intent = "TAKEOFF"
+        elif drone_model.stop_flag:
+            self._last_command_intent = "STOP"
+        elif drone_model.calibration_flag:
+            self._last_command_intent = "CALIBRATE"
+        else:
+            self._last_command_intent = None
         if drone_model.stop_flag:
             command |= self.FLAG_STOP
         if drone_model.calibration_flag:
@@ -157,7 +167,8 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         hands us the fresh socket.
         """
         try:
-            self.sock.sendto(packet, (self.drone_ip, self.control_port))
+            for port in self._target_ports:
+                self.sock.sendto(packet, (self.drone_ip, port))
         except OSError:
             # Socket was closed during video-reconnect window.
             # Wait for VideoReceiverService to call set_socket(…) with the
@@ -175,10 +186,8 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
                 command = getattr(self, "_last_command", None)
                 if command is not None:
                     flags = []
-                    if command & self.FLAG_TAKEOFF:
-                        flags.append("TAKEOFF")
-                    if command & self.FLAG_LAND:
-                        flags.append("LAND")
+                    if command & self.FLAG_TAKEOFF_OR_LAND:
+                        flags.append(getattr(self, "_last_command_intent", None) or "TAKEOFF_OR_LAND")
                     if command & self.FLAG_STOP:
                         flags.append("STOP")
                     if command & self.FLAG_CALIBRATION:
@@ -193,3 +202,8 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         state = "ON" if self.debug_packets else "OFF"
         print(f"[wifi-uav] debug {state}")
         return self.debug_packets
+
+    def _resolve_target_ports(self, control_port: int) -> tuple[int, ...]:
+        if self.variant == "uav":
+            return (control_port, control_port + 1)
+        return (control_port,)
