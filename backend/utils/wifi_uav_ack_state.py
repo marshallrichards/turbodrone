@@ -110,7 +110,6 @@ class WifiUavAckState:
     def __init__(self) -> None:
         self.slots = [WifiUavFrameSlot() for _ in range(self.SLOT_COUNT)]
         self.max_recv_seq = 0
-        self.last_finished = 0
         self.last_completed_seq: Optional[int] = None
         self._delivered_history: deque[int] = deque(maxlen=32)
 
@@ -124,7 +123,6 @@ class WifiUavAckState:
             slot.fragments.clear()
             slot.received_fragments.clear()
         self.max_recv_seq = 0
-        self.last_finished = 0
         self.last_completed_seq = None
         self._delivered_history.clear()
 
@@ -149,7 +147,6 @@ class WifiUavAckState:
             return None
 
         self.max_recv_seq = max(self.max_recv_seq, seq)
-        self.last_finished = seq
         slot.ingest(fragment_id, fragment_total, payload, frame_body_len=frame_body_len, quality=quality)
         if slot.is_complete():
             self.last_completed_seq = seq

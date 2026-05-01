@@ -47,15 +47,6 @@ REQUEST_B = (
     b"\x00\x00\x10\x00\x00\x00"
 )
 
-# Native ACK packet sequence fields. These are little-endian integer fields, not
-# arbitrary byte offsets:
-# - 12: queued user-command sequence
-# - 88: first ACK slot sequence
-# - 108: second ACK slot sequence
-REQUEST_A_COMMAND_SEQ_OFFSET = 12
-REQUEST_B_COMMAND_SEQ_OFFSET = 12
-REQUEST_B_ACK_SEQ_OFFSETS = (88, 108)
-
 NEUTRAL_EXTENDED_COMMAND = (
     b"\x66\x14\x80\x80\x80\x80\x00\x02"
     b"\x00\x00\x00\x00\x00\x00\x00\x00"
