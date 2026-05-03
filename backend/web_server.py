@@ -28,10 +28,14 @@ from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
 from models.wifi_uav_rc import WifiUavRcModel
 from models.cooingdv_rc import CooingdvRcModel
 from protocols.cooingdv_rc_protocol_adapter import CooingdvRcProtocolAdapter
+from protocols.cooingdv_jieli_rc_protocol_adapter import CooingdvJieliRcProtocolAdapter
+from protocols.cooingdv_jieli_video_protocol import CooingdvJieliVideoProtocolAdapter
 from protocols.cooingdv_video_protocol import CooingdvVideoProtocolAdapter
 from plugins.manager import PluginManager
 from utils.dropping_queue import DroppingQueue
 from utils.wifi_uav_variants import WIFI_UAV_DRONE_TYPES, resolve_wifi_uav_variant
+
+COOINGDV_DRONE_TYPES = {"cooingdv", "cooingdv_jieli"}
 
 
 class ConnectionManager:
@@ -94,7 +98,7 @@ def _control_capabilities_for_drone(drone_type: str) -> dict[str, bool]:
     These capabilities let the frontend keep its control cluster honest instead
     of assuming every implementation supports the same actions.
     """
-    if drone_type in {"s2x", "cooingdv"} or drone_type in WIFI_UAV_DRONE_TYPES:
+    if drone_type in {"s2x"} or drone_type in COOINGDV_DRONE_TYPES or drone_type in WIFI_UAV_DRONE_TYPES:
         return {
             "takeoff": True,
             "land": True,
@@ -219,25 +223,45 @@ async def lifespan(app: FastAPI):
             "variant": wifi_uav_variant,
             "debug": False,
         }
-    elif drone_type == "cooingdv":
+    elif drone_type in COOINGDV_DRONE_TYPES:
         logger.info("[main] Using Cooingdv drone implementation (RC UFO, KY UFO, E88 Pro).")
-        default_ip = "192.168.1.1"
-        default_ctrl_port = 7099
-        default_video_port = 7070  # RTSP port
-        default_control_rate = 20.0
+        if drone_type == "cooingdv_jieli":
+            default_ip = "192.168.8.15"
+            default_ctrl_port = 2228
+            default_video_port = 0
+            default_control_rate = 20.0
+        else:
+            default_ip = "192.168.1.1"
+            default_ctrl_port = 7099
+            default_video_port = 7070  # RTSP port
+            default_control_rate = 20.0
 
         drone_ip = os.getenv("DRONE_IP", default_ip)
         ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
         video_port = int(os.getenv("VIDEO_PORT", default_video_port))
 
         model = CooingdvRcModel()
-        rc_proto = CooingdvRcProtocolAdapter(drone_ip, ctrl_port)
-        video_adapter_cls = CooingdvVideoProtocolAdapter
-        video_adapter_args = {
-            "drone_ip": drone_ip,
-            "control_port": ctrl_port,
-            "video_port": video_port,
-        }
+        if drone_type == "cooingdv_jieli":
+            rc_proto = CooingdvJieliRcProtocolAdapter(drone_ip, ctrl_port)
+            video_adapter_cls = CooingdvJieliVideoProtocolAdapter
+            video_adapter_args = {
+                "drone_ip": drone_ip,
+                "control_port": ctrl_port,
+                "video_port": int(os.getenv("JIELI_RTP_VIDEO_PORT", video_port or 6666)),
+                "audio_port": int(os.getenv("JIELI_RTP_AUDIO_PORT", 1234)),
+                "sdp_port": int(os.getenv("JIELI_SDP_PORT", 6789)),
+                "width": int(os.getenv("JIELI_VIDEO_WIDTH", 640)),
+                "height": int(os.getenv("JIELI_VIDEO_HEIGHT", 360)),
+                "fps": int(os.getenv("JIELI_VIDEO_FPS", 30)),
+            }
+        else:
+            rc_proto = CooingdvRcProtocolAdapter(drone_ip, ctrl_port)
+            video_adapter_cls = CooingdvVideoProtocolAdapter
+            video_adapter_args = {
+                "drone_ip": drone_ip,
+                "control_port": ctrl_port,
+                "video_port": video_port,
+            }
     elif drone_type == "debug":
         logger.info("[main] Using debug drone implementation.")
         default_control_rate = 80.0

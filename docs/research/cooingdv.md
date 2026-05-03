@@ -38,6 +38,29 @@ Primary evidence:
   - `decompiled-rc-uf-19.3/sources/com/cooingdv/rcufo/models/VideoModel.java`
   - `decompiled-rc-uf-19.3/sources/com/cooingdv/rcufo/dialog/EnterPasswordDialog.java`
   - `decompiled-rc-uf-19.3/sources/com/cooingdv/rcufo/utils/WifiIdUtils.java`
+- Decompiled RC FPV app:
+  - `decompiled-rc-fpv-1.8.0/sources/com/cooingdv/rcfpv/socket/Config.java`
+  - `decompiled-rc-fpv-1.8.0/sources/com/cooingdv/rcfpv/socket/SocketClient.java`
+  - `decompiled-rc-fpv-1.8.0/sources/com/cooingdv/rcfpv/socket/UdpComm.java`
+  - `decompiled-rc-fpv-1.8.0/sources/com/cooingdv/rcfpv/tools/FlyController.java`
+  - `decompiled-rc-fpv-1.8.0/sources/com/cooingdv/bl60xmjpeg/UAV.java`
+  - `decompiled-rc-fpv-1.8.0/sources/com/cooingdv/rcfpv/utils/WifiIdUtils.java`
+- Decompiled KY FPV app:
+  - `decompiled-ky-fpv-2.0.0/sources/com/cooingdv/kyfpv/socket/Config.java`
+  - `decompiled-ky-fpv-2.0.0/sources/com/cooingdv/kyfpv/socket/UdpComm.java`
+  - `decompiled-ky-fpv-2.0.0/sources/com/cooingdv/kyfpv/fragment/DeviceTXFragment.java`
+  - `decompiled-ky-fpv-2.0.0/sources/com/cooingdv/kyfpv/tools/FlyController.java`
+  - `decompiled-ky-fpv-2.0.0/sources/com/cooingdv/kyfpv/utils/StreamClient.java`
+  - `decompiled-ky-fpv-2.0.0/sources/com/cooingdv/kyfpv/utils/FlyCommandUtils.java`
+  - `decompiled-ky-fpv-2.0.0/sources/com/cooingdv/kyfpv/tools/FlyCommand.java`
+  - `decompiled-ky-fpv-2.0.0/sources/com/cooingdv/kyfpv/utils/WifiIdUtils.java`
+- Decompiled 4DRC FPV app:
+  - `decompiled-4drc-fpv-1.6.0/sources/com/cooingdv/fpv4drc/socket/Config.java`
+  - `decompiled-4drc-fpv-1.6.0/sources/com/cooingdv/fpv4drc/socket/SocketClient.java`
+  - `decompiled-4drc-fpv-1.6.0/sources/com/cooingdv/fpv4drc/tools/FlyController.java`
+  - `decompiled-4drc-fpv-1.6.0/sources/com/cooingdv/fpv4drc/tools/DriveController.java`
+  - `decompiled-4drc-fpv-1.6.0/sources/com/cooingdv/fpv4drc/fragment/ExcavatorFragment.java`
+  - `decompiled-4drc-fpv-1.6.0/sources/com/cooingdv/fpv4drc/utils/WifiIdUtils.java`
 
 ## Executive Summary
 
@@ -70,6 +93,66 @@ frame blobs at the app boundary. The apps can also re-encode displayed frames to
 local H.264 MP4 for recording. That local H.264 encoder is not evidence that the
 drone's wire stream itself is H.264.
 
+## TurboDrone Compatibility Summary
+
+TurboDrone's current `cooingdv` implementation is a good match for drones that
+expose the classic CooingDV Wi-Fi path:
+
+- RC/telemetry on UDP `192.168.1.1:7099`
+- Video on `rtsp://192.168.1.1:7070/webcam`
+- 20 Hz stick loop
+- TC short packet `03 66 ... 99`
+- GL extended packet `03 66 14 ... 99`
+- Heartbeat `01 01`
+- Exit-control command `08 01`
+
+Compatibility by reviewed app:
+
+| Reviewed app | Current TurboDrone fit | Notes / edge cases |
+| --- | --- | --- |
+| KY UFO `com.cooingdv.kyufo` | Strong for classic Wi-Fi TC/GL; partial for native BL60x path | The Java Wi-Fi path matches UDP `7099` and RTSP `7070`. KY UFO also has native `UAV` / `libuav_gl.so` / `libuav_tc.so` transport targeting `192.168.169.1:8800`; TurboDrone does not implement that native path yet. |
+| RC UFO `com.cooingdv.rcufo` | Strong for classic Wi-Fi TC/GL | This is closest to TurboDrone's current adapter: UDP `7099`, RTSP `7070`, TC/GL auto-detection, password-capable IDs, and GL status telemetry. Some decompiled methods are damaged, so runtime captures are still useful. |
+| RC FPV `com.cooingdv.rcfpv` | Good for classic TC/short Wi-Fi path | RC FPV uses the same RTSP/UDP constants and short `03 66 ... 99` packet. Its Java `FlyController` does not show the GL 21-byte branch; treat it as TC/short unless telemetry proves otherwise. It references `UAV` native bridges, but this decompile lacks bundled `.so` files. |
+| KY FPV `com.cooingdv.kyfpv` | Good only for its classic `DeviceTXFragment` path; not complete for all KY FPV backends | KY FPV includes a TurboDrone-compatible RTSP/UDP TC path, but also has native `StreamClient` / `mjpeg_jni` and Jieli `DeviceClient` JSON `FLYING_CTRL` backends. TurboDrone does not currently implement those non-classic backends. |
+| 4DRC FPV `com.cooingdv.fpv4drc` | Strong for classic Wi-Fi TC/GL drone path; separate for excavator/drive mode | Drone flight control uses the same TC/GL split as KY UFO, with UDP `7099`, RTSP `7070`, and optional BL60x native `UAV`. It also adds `EXCAVATOR_720 = 89` and a distinct drive/excavator packet `03 33 ... 88`, which is not covered by TurboDrone's flight controller. |
+
+Control expectations for compatible classic-path drones:
+
+- Video should generally work via RTSP `7070`.
+- Manual stick control should generally work via UDP `7099`.
+- Emergency stop should generally work through the TC/GL emergency flag mapping.
+- Takeoff and land are best understood as TurboDrone UI abstractions over the
+  apps' fast-up / fast-down one-shot bits. The reviewed apps do not expose clear
+  named Android `takeoff` / `land` wire opcodes for the classic UDP path.
+
+Practical rule: if a drone works in one of these apps while exposing
+`192.168.1.1:7070` RTSP and responding on UDP `7099`, TurboDrone's current
+`cooingdv` adapter is likely the correct first attempt. If the app is using KY
+FPV's `mjpeg_jni`, Jieli JSON, or KY UFO's native `192.168.169.1:8800` path
+exclusively, TurboDrone needs a separate backend before compatibility can be
+claimed.
+
+Likely future TurboDrone split:
+
+- `cooingdv`: current classic RTSP/UDP implementation.
+- `cooingdv_bl`: BL60x native MJPEG/control transport used by KY UFO `UAV` and
+  KY FPV `StreamClient`, both centered on `192.168.169.1:8800`.
+- `cooingdv_jieli`: KY FPV Jieli/CTP backend using `192.168.8.15:2228`,
+  `DeviceClient`, `FLYING_CTRL`, and `CTP:` JSON packets.
+- `cooingdv_drive` or `cooingdv_4drc_drive`: optional future non-drone backend
+  for the 4DRC excavator/ground-vehicle path. This should stay separate from
+  flight because its packet shape and controls are not quadcopter RC controls.
+
+Implementation status in TurboDrone:
+
+- `cooingdv` is implemented for classic RTSP/UDP.
+- `cooingdv_jieli` has an initial RC implementation for `CTP:`/`FLYING_CTRL`
+  over UDP `2228` and a first-pass RTP/JPEG video adapter using SDP `6789` and
+  RTP video port `6666`.
+- `cooingdv_bl` remains research-only until runtime captures confirm the safe
+  ACK/session behavior needed for motor control.
+- `cooingdv_drive` is not implemented and is out of scope for flight support.
+
 ## Network Constants
 
 The two apps share the same network constants in `Config.java`.
@@ -93,6 +176,10 @@ The two apps share the same network constants in `Config.java`.
 The Java code inspected does not use `TCP_SERVER_PORT = 5000` for flight
 control. Active RC, heartbeat, camera switch, gallery sync, and password
 commands all go through `UdpComm` to UDP port `7099`.
+
+The newer KY FPV app still carries these constants for one of its RTSP/UDP
+screens, but it also supports other backends through `StreamClient` and
+`DeviceClient`; see "Additional CooingDV Publisher Apps" below.
 
 ## UDP Session Lifecycle
 
@@ -362,6 +449,425 @@ telemetry:
   - TC: `tc`, `e88`, `short`
   - GL: `gl`, `flow`, `extended`
   - Auto: empty, `auto`, `detect`, `autodetect`
+
+## Additional CooingDV Publisher Apps
+
+Two later decompiles broaden the CooingDV publisher picture:
+
+- `RC FPV 1.8.0` package: `com.cooingdv.rcfpv`
+- `KY FPV 2.0.0` package: `com.cooingdv.kyfpv`
+
+Both are recognizably from the same publisher family, but they do not map
+one-to-one onto the same runtime stack.
+
+### RC FPV 1.8.0
+
+RC FPV is closest to the original KY UFO / RC UFO implementation.
+
+Shared constants and paths:
+
+- `Config.PREVIEW_ADDRESS = "rtsp://192.168.1.1:7070/webcam"`
+- `SERVER_IP = "192.168.1.1"`
+- `SERVER_PORT = 7070`
+- `TCP_SERVER_PORT = 5000` defined but not used for RC in the inspected Java
+  paths.
+- `UdpComm.getInstance("192.168.1.1", 7099)`
+- `UdpComm` uses the same `DatagramSocket()` send/receive model and 20-byte
+  receive buffer.
+- Heartbeat is `01 01` every 1000 ms.
+- Camera switch uses `06 01` / `06 02`.
+- Photo/video gallery sync uses `09 01` / `09 02`.
+- Exit control mode uses `08 01` when not in native `UAV` mode.
+
+RC FPV includes the same Java native bridge package:
+
+- `com.cooingdv.bl60xmjpeg.UAV`
+- `GLJni` -> `System.loadLibrary("uav_gl")`
+- `TCJni` -> `System.loadLibrary("uav_tc")`
+
+However, the inspected `decompiled-rc-fpv-1.8.0/resources` tree has no
+`resources/lib` directory. Like RC UFO, this decompile either lacks the native
+split/universal APK libs or represents a packaging variant where those binaries
+were omitted from the extracted resource tree.
+
+RC FPV's `FlyController` builds only the TC/short inner packet:
+
+```text
+66 B1 B2 ACC TURN FLAGS CHECKSUM 99
+```
+
+Wi-Fi mode prefixes that with `0x03`:
+
+```text
+03 66 B1 B2 ACC TURN FLAGS CHECKSUM 99
+```
+
+Native `UAV` mode sends the inner 8-byte payload directly.
+
+RC FPV does not show the GL 20-byte packet branch in its `FlyController`. It is
+therefore best modeled as a TC/short CooingDV variant, with optional native
+`UAV` support if its missing native libraries are recovered.
+
+RC FPV flag bits match the TC-style family:
+
+- `0x01`: fast fly / up
+- `0x02`: fast drop / down
+- `0x04`: emergency stop
+- `0x08`: circle turn end / flip-like one-shot
+- `0x10`: no-head / headless
+- `0x20`: fast return or unlock
+- `0x80`: gyro correction
+
+Two details differ from the older RC UFO source:
+
+- `controlTurn` is dead-zoned to 128 when it falls between 104 and 152.
+- The decompiled fast-return/unlock branch is cleaner than RC UFO's damaged
+  output: `0x20` is set when `isFastReturn` or `isUnLock` is true.
+
+RC FPV `WifiIdUtils` is narrower than RC UFO:
+
+- Adds `COVERT_8K = 33`
+- Adds `RESOLUTION_SETTING = 46`
+- Double-camera IDs: `41`, `43`, `44`
+- Password-capable IDs still include `80`, `81`, `82`, `85` constants, but no
+  `EnterPasswordDialog` equivalent was observed in the same way as RC UFO.
+- No GL/flow ID table was observed in this `WifiIdUtils`; it is not doing the
+  same GL-vs-TC selection as RC UFO.
+
+### KY FPV 2.0.0
+
+KY FPV 2.0.0 is broader than the UFO apps and carries at least three control
+families behind one publisher UI.
+
+1. Native BL/MJPEG `StreamClient`
+
+`StreamClient` loads:
+
+```text
+System.loadLibrary("mjpeg_jni")
+```
+
+Native methods:
+
+- `streamStartServer()`
+- `streamStopServer()`
+- `streamSendCommand(byte[] command, int channel)`
+- `streamSwitchCamera(int index)`
+- `streamSetModify(String ssid, int resolution, int channel, int camera)`
+
+Callbacks:
+
+- `functionPicture(byte[], long, byte)` marks the stream active, sends native
+  command `64` (`0x64`, decimal 100) once, and forwards frame bytes to
+  `OnStreamListener.onVideo`.
+- `functionMessage(int)` handles resolution/status values, broadcasts fake
+  resolution changes, applies model-specific UI customization, and forwards the
+  integer to `OnStreamListener.onReceiver`.
+
+`FlyController` type `1` sends the same short TC inner packet through
+`StreamClient.sendCommand(...)`:
+
+```text
+66 B1 B2 ACC TURN FLAGS CHECKSUM 99
+```
+
+It also sends native command `65` (`0x65`, decimal 101) when leaving control
+mode, matching the older `UAV` native exit behavior.
+
+The native split APK for KY FPV contains `libmjpeg_jni.so` under
+`resources/config.armeabi_v7a.apk/lib/armeabi-v7a`. Ghidra and ELF inspection
+show it is the same protocol family as the KY UFO `libuav_tc.so` engine, but
+with a different Java wrapper:
+
+- Java class: `com.cooingdv.kyfpv.utils.StreamClient`
+- JNI library: `libmjpeg_jni.so`
+- Native target: `192.168.169.1:8800`
+- Local socket: UDP bound to `0.0.0.0` with an ephemeral local port
+- Start packet: `ef 00 04 00`
+- Incoming envelope marker: `0x93`
+- Native frame assembly: 1024-byte fragments, embedded `640x360` JPEG headers,
+  quality tables for 5/10/25/50/75/100, and final JPEG EOI `ff d9`
+- Native callbacks:
+  - `functionPicture(byte[], long, byte)`
+  - `functionMessage(int)`
+
+Important Ghidra-confirmed functions:
+
+- `Java_com_cooingdv_kyfpv_utils_StreamClient_streamStartServer`
+- `Java_com_cooingdv_kyfpv_utils_StreamClient_streamStopServer`
+- `Java_com_cooingdv_kyfpv_utils_StreamClient_streamSendCommand`
+- `Java_com_cooingdv_kyfpv_utils_StreamClient_streamSwitchCamera`
+- `Java_com_cooingdv_kyfpv_utils_StreamClient_streamSetModify`
+- `mjpeg_ndk_command_send`
+- `mjpeg_ndk_settings_send`
+- `mjpeg_ndk_queryinfo_cmd_send`
+- `handle_mcu_msg_frag`
+- `handle_mcu_msg_ack`
+- `build_send_ack`
+
+`streamSendCommand(byte[], int)` copies the Java command bytes and calls
+`mjpeg_ndk_command_send`. That native command path accepts payloads shorter than
+`0x81`, stores command length plus a `length + 0x0c` field, and piggybacks the
+command into the native ACK/control stream. This is not the Java UDP `7099`
+transport; it should be treated as a separate BL60x native backend even though
+the 8-byte stick payload is familiar.
+
+`streamSetModify(...)` builds the same `oGMcOfyZdIurm2kS` settings payload
+family seen in the KY UFO native code, with a mode value of `2` for this
+StreamClient path.
+
+2. Jieli / JSON `DeviceClient`
+
+KY FPV adds `com.jieli.lib.dv.control.DeviceClient` through `ClientManager`.
+This is a materially different backend from the raw UDP packet path.
+
+KY FPV constructs `new DeviceClient(context, 1)`, selecting the UDP
+implementation. The app connects to:
+
+```text
+192.168.8.15:2228
+```
+
+from `IConstants.DEFAULT_DEV_IP` and `AP_MODE_UDP_PORT`.
+
+The Jieli command envelope is not the CooingDV `0x03 0x66` packet. It is a
+little-endian CTP envelope:
+
+```text
+offset  size  meaning
+0x00    4     ASCII "CTP:"
+0x04    2     little-endian topic length
+0x06    N     topic string
+...     4     little-endian JSON payload length
+...     M     JSON payload
+```
+
+The JSON payload looks like:
+
+```json
+{"op":"PUT","param":{"state":"1"}}
+```
+
+or, for flight controls:
+
+```json
+{
+  "op": "PUT",
+  "param": {
+    "BYTE0": "102",
+    "BYTE1": "...",
+    "BYTE2": "...",
+    "BYTE3": "...",
+    "BYTE4": "...",
+    "BYTE5": "...",
+    "BYTE6": "...",
+    "BYTE7": "153"
+  }
+}
+```
+
+`FlyCommandUtils.tryToSendFlyCommand(int[])` sends a `SettingCmd` topic
+`FLYING_CTRL` with parameters:
+
+```text
+BYTE0=102
+BYTE1=B1
+BYTE2=B2
+BYTE3=ACC
+BYTE4=TURN
+BYTE5=FLAGS
+BYTE6=CHECKSUM
+BYTE7=153
+```
+
+`FlyController` type `2` uses this JSON backend. The same 8-byte TC control
+payload is preserved, but it is transported as named JSON settings rather than
+as a raw UDP datagram.
+
+Other JSON command topics in `FlyCommand` include:
+
+- `CONTROL_MODE`
+- `FLYING_CTRL`
+- `SWITCH_CAMERA`
+- `RT_PIC_POSITION_CTL`
+- `REQUEST_FAKE_NUMBER`
+- numeric legacy topics such as `0136`, `0138`, `0141`, `0142`, `0143`,
+  `0144`, `0145`, `0146`, `0147`
+
+This strongly suggests that newer CooingDV apps support at least one chipset/app
+backend that is not covered by TurboDrone's current raw UDP/RTSP CooingDV
+adapter.
+
+3. Classic RTSP/UDP `DeviceTXFragment`
+
+KY FPV still includes a classic RTSP/UDP path:
+
+- RTSP preview: `rtsp://192.168.1.1:7070/webcam`
+- UDP telemetry/control: `192.168.1.1:7099`
+- Heartbeat: `01 01`
+- Exit control: `08 01`
+- Photo/video notifications: `M` / `X`, with `09 01` / `09 02` responses
+- `OnReceivedOriginalDataListener` -> `MjpegThread.drawBitmap(byte[])`
+
+`FlyController` type `3` delegates raw 8-byte TC inner frames back to
+`DeviceTXFragment.sendFlyControllerData`, which prefixes `0x03` and sends the
+result by `UdpComm`.
+
+KY FPV therefore preserves the TurboDrone-compatible TC/short path, but it also
+contains non-TurboDrone backends.
+
+KY FPV `WifiIdUtils` has the broadest observed model table so far. Notable
+additional IDs and model families:
+
+- FPV IDs: `25`, `26`, `27`, `29`, `30`
+- DF FPV: `14`, `50`
+- E19 Eachine: `10`
+- Hasakee Q8: `62`
+- Qixin Toy: `34`
+- XKY 4K: `60`, `61`
+- hide/custom UI variants: `13`, `28`, `32`
+- PRO26 family: `105`, `109`, `112`, `119`, `121`, `123`, `124`
+- F-resolution no music/gesture IDs: `212`, `213`
+
+These model IDs should be considered publisher-level capability IDs, not just
+resolution values. KY FPV uses them to hide controls, change language, switch
+backgrounds, set double-camera state, and select backend behavior.
+
+### Impact On TurboDrone
+
+Current TurboDrone `cooingdv` support maps well to:
+
+- RC UFO Wi-Fi TC/GL path.
+- KY UFO Wi-Fi TC/GL path.
+- RC FPV classic TC Wi-Fi path.
+- KY FPV `DeviceTXFragment` classic TC Wi-Fi path.
+- 4DRC FPV drone-flight path.
+
+Current TurboDrone does not yet cover:
+
+- KY/RC native `UAV` / `StreamClient` BL60x-style native transport unless the
+  drone also exposes the classic Java Wi-Fi path.
+- KY FPV `DeviceClient` / Jieli JSON settings backend.
+- The expanded KY FPV model-ID capability table and UI-hide/customization
+  behavior.
+- 4DRC FPV excavator/ground-vehicle controls.
+
+The safest immediate expansion is to broaden CooingDV telemetry recognition with
+the RC FPV and KY FPV IDs while keeping the packet encoder conservative:
+
+- Treat RC FPV as TC/short unless runtime telemetry proves otherwise.
+- Treat KY FPV classic `DeviceTXFragment` as TC/short.
+- Do not assume the Jieli JSON backend is reachable through UDP `7099`.
+- Do not assume KY FPV native `mjpeg_jni` behaves exactly like KY UFO
+  `libuav_gl.so` / `libuav_tc.so` for every model, even though Ghidra shows the
+  same BL60x-style `192.168.169.1:8800` native protocol family.
+- Treat 4DRC FPV `EXCAVATOR_720 = 89` as a non-flight device class. It may share
+  video and native BL transport, but its RC packet is a drive/excavator packet,
+  not a quadcopter packet.
+
+Implementation recommendation:
+
+- Add `cooingdv_bl` only if hardware capture shows target drones require the
+  native `192.168.169.1:8800` path and do not expose classic RTSP/UDP.
+- Add `cooingdv_jieli` as a distinct backend if we want KY FPV
+  `DeviceClient`/Jieli devices. It needs CTP packet construction, UDP `2228`,
+  Jieli realtime stream handling, and JSON command topics. TurboDrone now has
+  initial CTP RC and RTP/JPEG video support, but it still needs hardware
+  validation and H.264 handling if a device chooses RTS format `1`.
+- Add a drive/excavator backend only if TurboDrone intentionally grows beyond
+  flying drones. The 4DRC excavator path is clearly CooingDV-family, but it does
+  not belong in a flight-control adapter.
+
+### 4DRC FPV 1.6.0
+
+4DRC FPV package:
+
+```text
+com.cooingdv.fpv4drc
+```
+
+The app is a strong overlap with KY UFO / RC FPV:
+
+- Classic RTSP preview: `rtsp://192.168.1.1:7070/webcam`
+- UDP command/telemetry: `192.168.1.1:7099`
+- Heartbeat: `01 01`
+- Camera switch: `06 01` / `06 02`
+- Photo/video gallery sync: `09 01` / `09 02`
+- Native bridge: `com.cooingdv.bl60xmjpeg.UAV`
+- Native libraries in split APK:
+  - `libuav_gl.so`
+  - `libuav_tc.so`
+  - `libnative-lib.so`
+  - IJK/OpenCV/GPUImage/pocketsphinx support libraries
+
+The 4DRC native `libuav_gl.so` and `libuav_tc.so` contain the same important
+BL60x-family strings and symbols:
+
+- `192.168.169.1`
+- `8800`
+- `mjpeg_ndk_start`
+- `mjpeg_ndk_command_send`
+- `mjpeg_ndk_set_active_camera_index`
+- `mjpeg_ndk_set_QPara`
+- `build_send_ack`
+- `handle_mcu_msg_frag`
+- embedded `jpeg_header_640x360_Q*` tables
+
+This means 4DRC FPV overlaps with `cooingdv_bl`, not Jieli.
+
+4DRC FPV `FlyController` is the familiar KY UFO-style TC/GL split:
+
+- If `UAV.getInstance().getDeviceType() != 10`, it builds the GL extended
+  20-byte inner payload `66 14 ... 99`, then prefixes `03` for Wi-Fi.
+- If device type is `10`, it builds the TC 8-byte inner payload `66 ... 99`,
+  then prefixes `03` for Wi-Fi.
+- Native `UAV` mode sends the inner payload directly.
+- Stop/exit sends native `65` (`0x65`, decimal 101) when native is active, or
+  UDP `08 01` otherwise.
+
+The biggest unique piece is not a drone: 4DRC FPV includes an excavator/drive
+mode.
+
+`WifiIdUtils` defines:
+
+```text
+EXCAVATOR_720 = 89
+```
+
+If this ID is selected, the menu opens `ExcavatorFragment`, which uses
+`DriveController`, not `FlyController`.
+
+`DriveController` packet:
+
+```text
+33 TURN ACCEL BUCKET_FLAGS MODE_FLAGS 88
+```
+
+Wi-Fi wrapper:
+
+```text
+03 33 TURN ACCEL BUCKET_FLAGS MODE_FLAGS 88
+```
+
+Drive/excavator bytes:
+
+- Byte 0: `0x33` (`51`)
+- Byte 1: turn
+- Byte 2: accelerator
+- Byte 3: bucket flags
+  - `0x01`: excavator rise
+  - `0x02`: excavator drop
+  - `0x04`: excavator left
+  - `0x08`: excavator right
+- Byte 4: mode flags
+  - `0x04`: auto
+  - `0x08`: music
+  - `0x10`: light
+- Byte 5: `0x88` (`136`)
+
+This packet has no checksum byte and is not compatible with TurboDrone's
+quadcopter control model. If we ever support it, it should be a separate
+ground-vehicle/excavator backend, not a `cooingdv` flight variant.
 
 ## Telemetry And App Messages
 
@@ -727,6 +1233,53 @@ into a small native queue. A separate delivery thread drains that queue:
 
 This means the native `UAV` frame callback is already latency-throttled before
 Java sees it. It is not just a raw packet callback.
+
+## PTZ / Servo / Camera Tilt Findings
+
+No confirmed PTZ or camera-tilt servo command was found in the inspected KY UFO
+or RC UFO paths.
+
+Several UI elements look suspicious at first:
+
+- `verticalBar`
+- `horizontalBar`
+- `horizontalCenterBar`
+- `view_control_device_vertical_add`
+- `view_control_device_vertical_del`
+- `VerticalSeekBar`
+
+However, these are flight trim controls, not camera servos. In both KY UFO and
+RC UFO, `verticalCurrentValue` is added into `controlByte2`, the same pitch axis
+that is sent in the regular RC control packet. `horizontalCurrentValue` adjusts
+yaw/turn, and `horizontalCenterCurrentValue` adjusts `controlByte1`.
+
+Observed mapping:
+
+- `horizontalBar` -> yaw trim / `controlTurn`
+- `horizontalCenterBar` -> roll trim / `controlByte1`
+- `verticalBar` -> pitch trim / `controlByte2`
+
+KY native camera-related functions are also not PTZ:
+
+- `UAV.switchActiveCamera(...)` -> `setActiveCameraIndex(...)` /
+  `nativeSetCameraIndex(...)`. Native code stores a camera index byte that is
+  later included in ACK/control state; this appears to select front/rear or
+  active camera stream.
+- `UAV.setQPara(...)` -> native JPEG quality parameter ranges. Native code
+  validates quality values such as 5, 10, 25, 50, 75, and 100 and stores
+  min/max quality thresholds.
+- `UAV.setModify(...)` is firmware/configuration UI for SSID, resolution,
+  channel, protocol, rotate, and flow orientation. It is not exposed as runtime
+  tilt control.
+
+The apps also implement digital pan/zoom on decoded frames through
+`MjpegThread.setFocusScale(...)` and `setFocusMove(...)`, but that is display
+crop/zoom, not mechanical camera motion.
+
+Conclusion: if some CooingDV-published drones have tilt servos, this pair of
+decompiled apps does not expose an obvious runtime PTZ command for them. It may
+exist in another white-label app, another firmware telemetry/status packet, or a
+model-specific command not reachable from the visible KY/RC UI.
 
 ## Video Feed
 
