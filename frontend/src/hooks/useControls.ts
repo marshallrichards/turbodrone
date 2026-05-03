@@ -15,6 +15,8 @@ export interface CommandCapabilities {
   takeoff: boolean;
   land: boolean;
   estop: boolean;
+  camera_tilt: boolean;
+  camera_switch: boolean;
 }
 /* ─────────────────────────────────────────────────────────── */
 
@@ -62,6 +64,8 @@ export function useControls() {
     takeoff: true,
     land: true,
     estop: true,
+    camera_tilt: false,
+    camera_switch: false,
   });
 
   // Track previous gamepad status to avoid spam
@@ -88,6 +92,8 @@ export function useControls() {
           takeoff: Boolean(data?.commands?.takeoff),
           land: Boolean(data?.commands?.land),
           estop: Boolean(data?.commands?.estop),
+          camera_tilt: Boolean(data?.commands?.camera_tilt),
+          camera_switch: Boolean(data?.commands?.camera_switch),
         });
       } catch {
         // Keep optimistic defaults when the backend is temporarily unavailable.
@@ -320,6 +326,7 @@ export function useControls() {
   const takeOff = () => sendCommand("takeoff");
   const land    = () => sendCommand("land");
   const emergencyStop = () => sendCommand("estop");
+  const setSpeedIndex = (speedIndex: number) => sendCommand("set_speed_index", { speed_index: speedIndex });
 
   /* ------------- hook return ------------------------------- */
   return {
@@ -332,5 +339,6 @@ export function useControls() {
     takeOff,
     land,
     emergencyStop,
+    setSpeedIndex,
   };
 }

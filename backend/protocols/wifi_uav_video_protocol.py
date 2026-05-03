@@ -13,6 +13,7 @@ from utils.wifi_uav_packets import (
     build_native_ack_packet,
 )
 from utils.wifi_uav_jpeg import generate_jpeg_headers, EOI
+from utils.wifi_uav_variants import get_wifi_uav_capabilities
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         super().__init__(drone_ip, control_port, video_port)
 
         self.variant = (variant or "auto").strip().lower()
+        self.capabilities = get_wifi_uav_capabilities(self.variant)
         self.debug = debug or logger.isEnabledFor(logging.DEBUG)
         self._dbg = logger.debug if self.debug else (lambda *a, **k: None)
         self._sock_lock = threading.Lock()
@@ -87,7 +89,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self.frames_ok = 0
         self.frames_dropped = 0
         self._dbg(f"[init] adapter ready (control:{control_port}  video:{video_port})")
-        if self.variant == "uav":
+        if self.capabilities.transport == "uav_dual_port":
             logger.info("[wifi-uav] UAV/FLOW variant selected; probing UDP ports %s", self._target_ports)
 
         # Watchdog for per-frame timeouts
@@ -262,7 +264,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         backend on 8801. For the explicit UAV/FLOW variant, probe both just as
         nativeStart() does. The FLD/legacy path keeps the single-port behavior.
         """
-        if self.variant == "uav":
+        if self.capabilities.transport == "uav_dual_port":
             return (control_port, control_port + 1)
         return (control_port,)
 

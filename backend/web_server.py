@@ -33,7 +33,11 @@ from protocols.cooingdv_jieli_video_protocol import CooingdvJieliVideoProtocolAd
 from protocols.cooingdv_video_protocol import CooingdvVideoProtocolAdapter
 from plugins.manager import PluginManager
 from utils.dropping_queue import DroppingQueue
-from utils.wifi_uav_variants import WIFI_UAV_DRONE_TYPES, resolve_wifi_uav_variant
+from utils.wifi_uav_variants import (
+    WIFI_UAV_DRONE_TYPES,
+    resolve_wifi_uav_capabilities,
+    resolve_wifi_uav_variant,
+)
 
 COOINGDV_DRONE_TYPES = {"cooingdv", "cooingdv_jieli"}
 
@@ -98,11 +102,23 @@ def _control_capabilities_for_drone(drone_type: str) -> dict[str, bool]:
     These capabilities let the frontend keep its control cluster honest instead
     of assuming every implementation supports the same actions.
     """
-    if drone_type in {"s2x"} or drone_type in COOINGDV_DRONE_TYPES or drone_type in WIFI_UAV_DRONE_TYPES:
+    if drone_type in WIFI_UAV_DRONE_TYPES:
+        wifi_uav_capabilities = resolve_wifi_uav_capabilities(drone_type)
         return {
             "takeoff": True,
             "land": True,
             "estop": True,
+            "camera_tilt": wifi_uav_capabilities.supports_camera_tilt,
+            "camera_switch": wifi_uav_capabilities.supports_camera_switch,
+        }
+
+    if drone_type in {"s2x"} or drone_type in COOINGDV_DRONE_TYPES:
+        return {
+            "takeoff": True,
+            "land": True,
+            "estop": True,
+            "camera_tilt": False,
+            "camera_switch": False,
         }
 
     if drone_type == "debug":
@@ -110,12 +126,16 @@ def _control_capabilities_for_drone(drone_type: str) -> dict[str, bool]:
             "takeoff": True,
             "land": True,
             "estop": False,
+            "camera_tilt": False,
+            "camera_switch": False,
         }
 
     return {
         "takeoff": False,
         "land": False,
         "estop": False,
+        "camera_tilt": False,
+        "camera_switch": False,
     }
 
 class FrameHub:
@@ -494,6 +514,11 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             elif msg_type == "set_profile":
                 try:
                     flight_controller.model.set_profile(data.get("name", "normal"))
+                except Exception:
+                    pass
+            elif msg_type in ("set_speed_index", "speed_index"):
+                try:
+                    flight_controller.model.set_speed_index(data.get("speed_index", data.get("value", 2)))
                 except Exception:
                     pass
             elif msg_type == "takeoff":

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from typing import Final
 
 
@@ -14,6 +15,36 @@ WIFI_UAV_DRONE_TYPES: Final[frozenset[str]] = frozenset({
 
 _UAV_PREFIXES: Final[tuple[str, ...]] = ("flow_", "flow-", "flow")
 _FLD_PREFIXES: Final[tuple[str, ...]] = ("wifi_", "gd89pro_", "wtech-", "wtech_", "drone_")
+
+
+@dataclass(frozen=True)
+class WifiUavCapabilities:
+    variant: str
+    transport: str
+    supports_camera_tilt: bool
+    supports_camera_switch: bool
+    video_ports: tuple[int, ...]
+    rc_command_shape: str
+
+
+_VARIANT_CAPABILITIES: Final[dict[str, WifiUavCapabilities]] = {
+    "fld": WifiUavCapabilities(
+        variant="fld",
+        transport="fld_compat",
+        supports_camera_tilt=False,
+        supports_camera_switch=False,
+        video_ports=(8800,),
+        rc_command_shape="native_ack_embedded",
+    ),
+    "uav": WifiUavCapabilities(
+        variant="uav",
+        transport="uav_dual_port",
+        supports_camera_tilt=True,
+        supports_camera_switch=True,
+        video_ports=(8800, 8801),
+        rc_command_shape="native_ack_embedded",
+    ),
+}
 
 
 def wifi_uav_variant_from_drone_type(drone_type: str) -> str:
@@ -44,6 +75,16 @@ def resolve_wifi_uav_variant(drone_type: str) -> str:
         return mapped
 
     return "fld"
+
+
+def get_wifi_uav_capabilities(variant: str) -> WifiUavCapabilities:
+    """Return the internal capability profile for a resolved WiFi-UAV variant."""
+    return _VARIANT_CAPABILITIES.get((variant or "").strip().lower(), _VARIANT_CAPABILITIES["fld"])
+
+
+def resolve_wifi_uav_capabilities(drone_type: str) -> WifiUavCapabilities:
+    """Resolve a user-facing DRONE_TYPE to its internal capability profile."""
+    return get_wifi_uav_capabilities(resolve_wifi_uav_variant(drone_type))
 
 
 def map_wifi_uav_variant_from_ssid(ssid: str | None) -> str | None:

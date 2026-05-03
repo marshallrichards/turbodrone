@@ -1192,7 +1192,9 @@ Implemented:
 - best-effort SSID mapping
 - `DRONE_` maps to `fld`
 - `wifi_uav_uav` probes `8800` and `8801`
+- internal WiFi-UAV capability profiles for `fld` and `uav`
 - corrected WiFi-UAV extended land/e-stop semantics
+- WiFi-UAV speed tier field (`speed_index`) using the app's speed scale table
 - native-shaped ACK/request packet builder
 - native fragment parser
 - ACK state tracking
@@ -1214,7 +1216,8 @@ Recommended implementation cleanup:
   - `camera_tilt_state` / `ptz_state` (`0`, `1`, `2`) with the UI wording
     biased toward "tilt" unless hardware proves full PTZ
   - `camera_index` or camera-switch command
-  - `speed_index`
+- Add frontend controls for `speed_index` and camera tilt once the hardware
+  behavior is tested.
 - Build the extended command bytes from the documented `xx.g()` structure
   rather than from fixed packet constants, then pass that command into
   `build_native_ack_packet()`.

@@ -3,6 +3,7 @@ from typing import Final, List, Optional
 
 from protocols.base_protocol_adapter import BaseProtocolAdapter
 from models.wifi_uav_rc import WifiUavRcModel
+from utils.wifi_uav_variants import get_wifi_uav_capabilities
 
 
 class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
@@ -44,6 +45,9 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
     FLAG_TAKEOFF_OR_LAND = 0x01
     FLAG_STOP = 0x02
     FLAG_CALIBRATION = 0x04
+    FLAG_FLIP = 0x08
+
+    _SPEED_SCALES: Final[tuple[float, ...]] = (0.30, 0.60, 1.00, 0.25)
 
     # ------------------------------------------------------------------ #
     def __init__(self,
@@ -54,6 +58,7 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         self.drone_ip = drone_ip
         self.control_port = control_port
         self.variant = (variant or "auto").strip().lower()
+        self.capabilities = get_wifi_uav_capabilities(self.variant)
         self._target_ports = self._resolve_target_ports(control_port)
 
         self.sock = shared_sock or socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -115,15 +120,20 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
             command |= self.FLAG_STOP
         if drone_model.calibration_flag:
             command |= self.FLAG_CALIBRATION
+        if getattr(drone_model, "flip_flag", False):
+            command |= self.FLAG_FLIP
+        camera_tilt_state = max(0, min(2, int(getattr(drone_model, "camera_tilt_state", 0))))
+        command |= (camera_tilt_state & 0x03) << 6
 
         headless = 0x03 if drone_model.headless_flag else 0x02
 
         # ----- controls -------------------------------------------------
+        speed_index = max(0, min(3, int(getattr(drone_model, "speed_index", 2))))
         controls: List[int] = [
-            int(drone_model.roll)     & 0xFF,
-            int(drone_model.pitch)    & 0xFF,
-            int(drone_model.throttle) & 0xFF,
-            int(drone_model.yaw)      & 0xFF,
+            self._apply_speed_scale(drone_model.roll, speed_index),
+            self._apply_speed_scale(drone_model.pitch, speed_index),
+            self._apply_speed_scale(drone_model.throttle, speed_index),
+            self._apply_speed_scale(drone_model.yaw, speed_index),
             command & 0xFF,
             headless & 0xFF,
         ]
@@ -156,6 +166,8 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         drone_model.land_flag = False
         drone_model.stop_flag = False
         drone_model.calibration_flag = False
+        drone_model.flip_flag = False
+        drone_model.camera_tilt_state = 0
 
         return bytes(pkt)
 
@@ -192,6 +204,11 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
                         flags.append("STOP")
                     if command & self.FLAG_CALIBRATION:
                         flags.append("CALIBRATE")
+                    if command & self.FLAG_FLIP:
+                        flags.append("FLIP")
+                    tilt = (command >> 6) & 0x03
+                    if tilt:
+                        flags.append(f"TILT:{tilt}")
                     if flags:
                         print(f"[wifi-uav] command flags: {', '.join(flags)}")
             except Exception:
@@ -204,6 +221,12 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
         return self.debug_packets
 
     def _resolve_target_ports(self, control_port: int) -> tuple[int, ...]:
-        if self.variant == "uav":
+        if self.capabilities.transport == "uav_dual_port":
             return (control_port, control_port + 1)
         return (control_port,)
+
+    def _apply_speed_scale(self, value: float, speed_index: int) -> int:
+        """Scale a raw model axis around its center using the app's speed table."""
+        scale = self._SPEED_SCALES[speed_index]
+        centered = float(value) - 128.0
+        return max(0, min(255, round(128.0 + centered * scale)))
