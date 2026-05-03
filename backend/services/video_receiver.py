@@ -5,7 +5,6 @@ import time
 import os
 import logging
 
-from protocols.wifi_uav_video_protocol import WifiUavVideoProtocolAdapter
 from utils.dropping_queue import DroppingQueue
 from models.video_frame import VideoFrame
 
@@ -89,8 +88,7 @@ class VideoReceiverService:
                     **self.protocol_adapter_args
                 )
                 
-                # Special handling for WifiUavVideoProtocolAdapter to pass the RC adapter
-                if isinstance(self.protocol, WifiUavVideoProtocolAdapter) and self.rc_adapter:
+                if self.rc_adapter and hasattr(self.protocol, "set_rc_adapter"):
                     self.protocol.set_rc_adapter(self.rc_adapter)
 
                 # 2. Start the protocol's receiver loop

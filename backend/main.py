@@ -25,6 +25,9 @@ from protocols.cooingdv_rc_protocol_adapter import CooingdvRcProtocolAdapter
 from protocols.cooingdv_jieli_rc_protocol_adapter import CooingdvJieliRcProtocolAdapter
 from protocols.cooingdv_jieli_video_protocol import CooingdvJieliVideoProtocolAdapter
 from protocols.cooingdv_video_protocol import CooingdvVideoProtocolAdapter
+from models.wifi_cam_rc import WifiCamRcModel
+from protocols.wifi_cam_rc_protocol_adapter import WifiCamRcProtocolAdapter
+from protocols.wifi_cam_video_protocol import WifiCamVideoProtocolAdapter
 
 from services.flight_controller import FlightController
 from services.video_receiver import VideoReceiverService
@@ -41,10 +44,10 @@ logger = logging.getLogger(__name__)
 def main():
     parser = argparse.ArgumentParser(description="Drone teleoperation interface")
     parser.add_argument("--drone-type", type=str, default="s2x",
-                        choices=["s2x", "wifi_uav", "wifi_uav_fld", "wifi_uav_uav", "cooingdv", "cooingdv_jieli"],
-                        help="Type of drone to control (s2x, wifi_uav, wifi_uav_fld, wifi_uav_uav, cooingdv, or cooingdv_jieli, default: s2x)")
+                        choices=["s2x", "wifi_uav", "wifi_uav_fld", "wifi_uav_uav", "cooingdv", "cooingdv_jieli", "wifi_cam"],
+                        help="Type of drone to control (s2x, wifi_uav, wifi_uav_fld, wifi_uav_uav, cooingdv, cooingdv_jieli, or wifi_cam, default: s2x)")
     parser.add_argument("--drone-ip", type=str,
-                        help="Drone UDP IP address (default: s2x=172.16.10.1, wifi_uav=192.168.169.1, cooingdv=192.168.1.1)")
+                        help="Drone UDP IP address (default: s2x=172.16.10.1, wifi_uav=192.168.169.1, cooingdv=192.168.1.1, wifi_cam=192.168.4.153)")
     parser.add_argument("--control-port", type=int,
                         help="Drone control port (default: s2x=8080, wifi_uav=8800)")
     parser.add_argument("--video-port", type=int,
@@ -112,6 +115,24 @@ def main():
         else:
             protocol_adapter = CooingdvRcProtocolAdapter(drone_ip, control_port)
             video_protocol_adapter_class = CooingdvVideoProtocolAdapter
+    elif args.drone_type == "wifi_cam":
+        logger.info("[main] Using WiFi_CAM native UDP implementation.")
+        default_ip = "192.168.4.153"
+        default_control_port = 8090
+        default_video_port = 8080
+        default_rate = 25.0
+
+        drone_ip = args.drone_ip if args.drone_ip else default_ip
+        control_port = args.control_port if args.control_port else default_control_port
+        video_port = args.video_port if args.video_port else default_video_port
+
+        drone_model = WifiCamRcModel()
+        protocol_adapter = WifiCamRcProtocolAdapter(
+            drone_ip,
+            control_port,
+            command_mode=os.getenv("WIFI_CAM_COMMAND_MODE", "auto"),
+        )
+        video_protocol_adapter_class = WifiCamVideoProtocolAdapter
     else:
         # Should not happen due to choices in argparse
         logger.error("[main] Unknown drone type: %s", args.drone_type)
@@ -151,6 +172,12 @@ def main():
             }
             if args.drone_type == "cooingdv_jieli":
                 video_protocol_args["video_port"] = video_port or 6666
+        elif args.drone_type == "wifi_cam":
+            video_protocol_args = {
+                "drone_ip": drone_ip,
+                "control_port": control_port,
+                "video_port": video_port,
+            }
         
         frame_queue = queue.Queue(maxsize=100)
         video_receiver = VideoReceiverService(
@@ -159,7 +186,7 @@ def main():
             frame_queue,
             dump_frames=args.dump_frames,
             dump_packets=args.dump_packets,
-            rc_adapter=protocol_adapter if args.drone_type in WIFI_UAV_DRONE_TYPES else None,
+            rc_adapter=protocol_adapter if args.drone_type in WIFI_UAV_DRONE_TYPES or args.drone_type == "wifi_cam" else None,
         )
         video_view = OpenCVVideoView(frame_queue)
         

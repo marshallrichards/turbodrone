@@ -31,6 +31,9 @@ from protocols.cooingdv_rc_protocol_adapter import CooingdvRcProtocolAdapter
 from protocols.cooingdv_jieli_rc_protocol_adapter import CooingdvJieliRcProtocolAdapter
 from protocols.cooingdv_jieli_video_protocol import CooingdvJieliVideoProtocolAdapter
 from protocols.cooingdv_video_protocol import CooingdvVideoProtocolAdapter
+from models.wifi_cam_rc import WifiCamRcModel
+from protocols.wifi_cam_rc_protocol_adapter import WifiCamRcProtocolAdapter
+from protocols.wifi_cam_video_protocol import WifiCamVideoProtocolAdapter
 from plugins.manager import PluginManager
 from utils.dropping_queue import DroppingQueue
 from utils.wifi_uav_variants import (
@@ -112,13 +115,13 @@ def _control_capabilities_for_drone(drone_type: str) -> dict[str, bool]:
             "camera_switch": wifi_uav_capabilities.supports_camera_switch,
         }
 
-    if drone_type in {"s2x"} or drone_type in COOINGDV_DRONE_TYPES:
+    if drone_type in {"s2x", "wifi_cam"} or drone_type in COOINGDV_DRONE_TYPES:
         return {
             "takeoff": True,
             "land": True,
             "estop": True,
             "camera_tilt": False,
-            "camera_switch": False,
+            "camera_switch": drone_type == "wifi_cam",
         }
 
     if drone_type == "debug":
@@ -282,6 +285,27 @@ async def lifespan(app: FastAPI):
                 "control_port": ctrl_port,
                 "video_port": video_port,
             }
+    elif drone_type == "wifi_cam":
+        logger.info("[main] Using WiFi_CAM native UDP implementation.")
+        default_ip = "192.168.4.153"
+        default_ctrl_port = 8090
+        default_video_port = 8080
+        default_control_rate = 25.0
+
+        drone_ip = os.getenv("DRONE_IP", default_ip)
+        ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
+        video_port = int(os.getenv("VIDEO_PORT", default_video_port))
+        command_mode = os.getenv("WIFI_CAM_COMMAND_MODE", "auto")
+
+        model = WifiCamRcModel()
+        rc_proto = WifiCamRcProtocolAdapter(drone_ip, ctrl_port, command_mode=command_mode)
+        video_adapter_cls = WifiCamVideoProtocolAdapter
+        video_adapter_args = {
+            "drone_ip": drone_ip,
+            "control_port": ctrl_port,
+            "video_port": video_port,
+            "debug": os.getenv("WIFI_CAM_VIDEO_DEBUG", "false").lower() in ("1", "true", "yes", "on"),
+        }
     elif drone_type == "debug":
         logger.info("[main] Using debug drone implementation.")
         default_control_rate = 80.0
@@ -298,7 +322,7 @@ async def lifespan(app: FastAPI):
         "protocol_adapter_args": video_adapter_args,
         "frame_queue": RAW_Q,
     }
-    if drone_type in WIFI_UAV_DRONE_TYPES:
+    if drone_type in WIFI_UAV_DRONE_TYPES or drone_type == "wifi_cam":
         video_service_args["rc_adapter"] = rc_proto
     
     receiver = VideoReceiverService(**video_service_args)

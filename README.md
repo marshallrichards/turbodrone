@@ -77,6 +77,8 @@ DRONE_TYPE=s2x
 # DRONE_TYPE=cooingdv
 # For KY FPV / Jieli CTP control with first-pass RTP/JPEG video:
 # DRONE_TYPE=cooingdv_jieli
+# For WiFi_CAM native UDP apps:
+# DRONE_TYPE=wifi_cam
 ```
 
 Launch the backend: 
