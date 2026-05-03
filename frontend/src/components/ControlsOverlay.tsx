@@ -1,23 +1,28 @@
 import AxisIndicator from "./AxisIndicator";
-import type { Axes, CommandCapabilities } from "../hooks/useControls";
+import type { Axes, CommandCapabilities, SpeedTier } from "../hooks/useControls";
 import CommandButtons from "./CommandButtons";
+import SpeedControl from "./SpeedControl";
 
 interface ControlsOverlayProps {
   axes: Axes;
   droneType: string;
   commandCapabilities: CommandCapabilities;
+  speedTier: SpeedTier;
   onTakeoff: () => void;
   onLand: () => void;
   onEstop: () => void;
+  onSpeedChange: (tier: SpeedTier) => void;
 }
 
 export default function ControlsOverlay({
   axes,
   droneType,
   commandCapabilities,
+  speedTier,
   onTakeoff,
   onLand,
   onEstop,
+  onSpeedChange,
 }: ControlsOverlayProps) {
   const left   = { x: axes.roll,     y: axes.pitch };
   const right  = { x: axes.yaw,      y: axes.throttle };
@@ -51,6 +56,14 @@ export default function ControlsOverlay({
           onLand={onLand}
           onEstop={onEstop}
         />
+
+        {commandCapabilities.speed_control && (
+          <SpeedControl
+            enabled={commandCapabilities.speed_control}
+            value={speedTier}
+            onChange={onSpeedChange}
+          />
+        )}
 
         {/* Sticks */}
         <div className="flex gap-10">

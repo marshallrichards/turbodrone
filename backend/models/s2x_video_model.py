@@ -27,13 +27,16 @@ class S2xVideoModel(BaseVideoModel):
         *,
         stream_id: int | None = None,
         chunk_id: int | None = None,
+        total_chunks: int | None = None,
         payload: bytes,
     ) -> Optional[VideoFrame]:
 
         if stream_id is None or chunk_id is None:
             return None  # S2x packets always carry both ids
 
-        # frame-id changed? → finish previous frame
+        # frame-id changed? -> finish previous frame. Native VNDK emits as soon
+        # as all declared chunks arrive, but this fallback preserves older
+        # rollover-based behavior for captures without a usable chunk count.
         completed: Optional[VideoFrame] = None
         if self._cur_fid is None:
             self._cur_fid = stream_id
@@ -43,6 +46,15 @@ class S2xVideoModel(BaseVideoModel):
 
         # stash slice (ignore duplicates)
         self._frags.setdefault(chunk_id, payload)
+
+        if completed is not None:
+            return completed
+
+        if total_chunks is not None and 0 < total_chunks <= 100:
+            expected = set(range(total_chunks))
+            if expected.issubset(self._frags):
+                return self._assemble_current(expected)
+
         return completed
 
     # ──────────────────────────────────────────────────────────
@@ -52,16 +64,19 @@ class S2xVideoModel(BaseVideoModel):
         self._cur_fid = new_fid
         self._frags.clear()
 
-    def _assemble_current(self) -> Optional[VideoFrame]:
+    def _assemble_current(self, keys_to_use: set[int] | None = None) -> Optional[VideoFrame]:
         if not self._frags:
             return None
 
-        keys = sorted(self._frags)
-        complete = len(keys) == keys[-1] - keys[0] + 1
-        if not complete:
-            missing = (keys[-1] - keys[0] + 1) - len(keys)
-           # print(f"[s2x-model] Dropping frame {self._cur_fid}: {missing} slices missing")
-            return None
+        if keys_to_use is None:
+            keys = sorted(self._frags)
+            complete = len(keys) == keys[-1] - keys[0] + 1
+            if not complete:
+                missing = (keys[-1] - keys[0] + 1) - len(keys)
+               # print(f"[s2x-model] Dropping frame {self._cur_fid}: {missing} slices missing")
+                return None
+        else:
+            keys = sorted(keys_to_use)
 
         data = b"".join(self._frags[k] for k in keys)
 

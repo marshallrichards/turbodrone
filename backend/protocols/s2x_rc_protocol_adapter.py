@@ -10,6 +10,14 @@ class S2xRCProtocolAdapter(BaseProtocolAdapter):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.debug_packets = False
         self.packet_counter = 0
+        self.swap_yaw_roll = False
+        # Stock Macrochip HY packets scale roll/pitch for app speed tiers.
+        # Keep full-scale as the default so existing S2X behavior is unchanged.
+        self.speed_scale_by_index = {
+            0: 0.7,  # PL FPV uses 0.7; older HiTurbo builds use 0.6.
+            1: 0.8,
+            2: 1.0,
+        }
         
     def build_control_packet(self, drone_model):
         """Build a control packet for the S2x protocol"""
@@ -17,11 +25,19 @@ class S2xRCProtocolAdapter(BaseProtocolAdapter):
         pkt[0] = 0x66
         pkt[1] = drone_model.speed & 0xFF
 
-        # Remap from constrained range to full 0-255 range
-        pkt[2] = int(self._remap_to_full_range(drone_model.roll, drone_model)) & 0xFF
-        pkt[3] = int(self._remap_to_full_range(drone_model.pitch, drone_model)) & 0xFF  
+        roll = drone_model.roll
+        yaw = drone_model.yaw
+        if self.swap_yaw_roll:
+            roll, yaw = yaw, roll
+
+        speed_scale = self.speed_scale_by_index.get(getattr(drone_model, "speed_index", 2), 1.0)
+
+        # Remap from constrained range to full 0-255 range.
+        # Macrochip HY control only speed-scales roll/pitch, not throttle/yaw.
+        pkt[2] = int(self._remap_to_full_range(self._scale_axis(roll, drone_model, speed_scale), drone_model)) & 0xFF
+        pkt[3] = int(self._remap_to_full_range(self._scale_axis(drone_model.pitch, drone_model, speed_scale), drone_model)) & 0xFF
         pkt[4] = int(self._remap_to_full_range(drone_model.throttle, drone_model)) & 0xFF
-        pkt[5] = int(self._remap_to_full_range(drone_model.yaw, drone_model)) & 0xFF
+        pkt[5] = int(self._remap_to_full_range(yaw, drone_model)) & 0xFF
 
         # Byte 6 for command flags
         pkt[6] = 0x00
@@ -37,8 +53,8 @@ class S2xRCProtocolAdapter(BaseProtocolAdapter):
         if drone_model.calibration_flag:
             pkt[6] |= 0x04
 
-        # Byte 7 - base value 0x0a (matches the stock app's default control
-        # mode bits) plus optional headless flag.
+        # Byte 7 - historical TurboDrone base mode bits plus optional headless
+        # flag. Stock apps commonly send 0x02, but 0x0a is proven on hardware.
         pkt[7] = 0x0a
         if drone_model.headless_flag:
             pkt[7] |= 0x01
@@ -101,3 +117,9 @@ class S2xRCProtocolAdapter(BaseProtocolAdapter):
         else:
             # Map min_control...center to 0...128
             return (value - model.min_control_value) * 128.0 / (model.center_value - model.min_control_value)
+
+    def _scale_axis(self, value, model, scale):
+        """Scale a raw axis around center using the stock app speed tier."""
+        if scale >= 1.0:
+            return value
+        return model.center_value + ((value - model.center_value) * scale)

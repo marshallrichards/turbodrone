@@ -31,6 +31,7 @@ class S2xDroneModel(BaseRCModel):
 
         # misc
         self.speed = 20    # matches 0x14 from dumps
+        self.speed_index = 2
 
         # Track last direction for each axis
         self.last_throttle_dir = 0
@@ -58,6 +59,10 @@ class S2xDroneModel(BaseRCModel):
     def emergency_stop(self):
         """Set the emergency stop flag."""
         self.stop_flag = True
+
+    def set_speed_index(self, speed_index: int) -> None:
+        """Set the Macrochip app speed tier: 0=low, 1=medium, 2=full."""
+        self.speed_index = max(0, min(2, int(speed_index)))
     
     def get_control_state(self):
         """Get current control state as a dict"""
@@ -66,6 +71,7 @@ class S2xDroneModel(BaseRCModel):
             "yaw":       self.yaw,
             "pitch":     self.pitch,
             "roll":      self.roll,
+            "speed_index": self.speed_index,
         }
 
     def set_strategy(self, strategy) -> None:

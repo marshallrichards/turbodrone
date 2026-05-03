@@ -88,24 +88,42 @@ class S2xVideoProtocolAdapter(BaseVideoProtocolAdapter):
 
     def handle_payload(self, payload: bytes) -> Optional[VideoFrame]:
         """
-        1. Validate & strip the fixed 8-byte S2x header
+        1. Validate & strip the native 8-byte S2x header
         2. Forward the slice payload to the model
+
+        PL FPV's native `libvison_main.so` parser treats the header as:
+        0-1 sync `0x40 0x40`, 2-3 little-endian frame id, 4 total chunks,
+        5 chunk id, 6-7 little-endian datagram length.
         """
         if len(payload) <= self.HEADER_LEN or payload[:2] != self.SYNC_BYTES:
             return None
 
-        frame_id     = payload[2]
+        frame_id = int.from_bytes(payload[2:4], "little")
+        total_chunks = payload[4]
         slice_id_raw = payload[5]
+        declared_len = int.from_bytes(payload[6:8], "little")
 
-        body = payload[self.HEADER_LEN:]
+        if total_chunks == 0 or total_chunks > 100:
+            return None
+        if slice_id_raw >= total_chunks:
+            return None
+        if declared_len != len(payload):
+            return None
 
-        # strip optional "##" trailer
-        if body.endswith(self.EOS_MARKER):
-            body = body[:-len(self.EOS_MARKER)]
+        # Native 872 parsing copies declared_len - 10 bytes from offset 8,
+        # effectively dropping the 2-byte datagram trailer.
+        body_end = declared_len
+        if declared_len >= self.HEADER_LEN + len(self.EOS_MARKER) and payload[
+            declared_len - len(self.EOS_MARKER) : declared_len
+        ] == self.EOS_MARKER:
+            body_end -= len(self.EOS_MARKER)
+
+        body = payload[self.HEADER_LEN:body_end]
 
         return self.model.ingest_chunk(
             stream_id=frame_id,
             chunk_id=slice_id_raw,
+            total_chunks=total_chunks,
             payload=body,
         )
 

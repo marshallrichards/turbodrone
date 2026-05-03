@@ -17,7 +17,10 @@ export interface CommandCapabilities {
   estop: boolean;
   camera_tilt: boolean;
   camera_switch: boolean;
+  speed_control: boolean;
 }
+
+export type SpeedTier = 0 | 1 | 2;
 /* ─────────────────────────────────────────────────────────── */
 
 export function useControls() {
@@ -66,7 +69,9 @@ export function useControls() {
     estop: true,
     camera_tilt: false,
     camera_switch: false,
+    speed_control: false,
   });
+  const [speedTier, setSpeedTierSt] = useState<SpeedTier>(2);
 
   // Track previous gamepad status to avoid spam
   const prevGamepadStatus = useRef<boolean>(false);
@@ -94,6 +99,7 @@ export function useControls() {
           estop: Boolean(data?.commands?.estop),
           camera_tilt: Boolean(data?.commands?.camera_tilt),
           camera_switch: Boolean(data?.commands?.camera_switch),
+          speed_control: Boolean(data?.commands?.speed_control),
         });
       } catch {
         // Keep optimistic defaults when the backend is temporarily unavailable.
@@ -326,7 +332,13 @@ export function useControls() {
   const takeOff = () => sendCommand("takeoff");
   const land    = () => sendCommand("land");
   const emergencyStop = () => sendCommand("estop");
-  const setSpeedIndex = (speedIndex: number) => sendCommand("set_speed_index", { speed_index: speedIndex });
+  const setSpeedIndex = useCallback((speedIndex: number) => {
+    sendCommand("set_speed_index", { speed_index: speedIndex });
+  }, []);
+  const setSpeedTier = useCallback((tier: SpeedTier) => {
+    setSpeedTierSt(tier);
+    setSpeedIndex(tier);
+  }, [setSpeedIndex]);
 
   /* ------------- hook return ------------------------------- */
   return {
@@ -340,5 +352,7 @@ export function useControls() {
     land,
     emergencyStop,
     setSpeedIndex,
+    speedTier,
+    setSpeedTier,
   };
 }

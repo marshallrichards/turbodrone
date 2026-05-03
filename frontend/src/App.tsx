@@ -16,6 +16,8 @@ function App() {
     takeOff,
     land,
     emergencyStop,
+    speedTier,
+    setSpeedTier,
   } = useControls();
 
   return (
@@ -26,9 +28,11 @@ function App() {
         axes={axes}
         droneType={droneType}
         commandCapabilities={commandCapabilities}
+        speedTier={speedTier}
         onTakeoff={takeOff}
         onLand={land}
         onEstop={emergencyStop}
+        onSpeedChange={setSpeedTier}
       />
       <ControlSchemeToggle mode={mode} setMode={setMode} gamepadConnected={gamepadConnected} />
       <PluginControls />

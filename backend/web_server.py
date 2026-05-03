@@ -113,6 +113,7 @@ def _control_capabilities_for_drone(drone_type: str) -> dict[str, bool]:
             "estop": True,
             "camera_tilt": wifi_uav_capabilities.supports_camera_tilt,
             "camera_switch": wifi_uav_capabilities.supports_camera_switch,
+            "speed_control": True,
         }
 
     if drone_type in {"s2x", "wifi_cam"} or drone_type in COOINGDV_DRONE_TYPES:
@@ -122,6 +123,7 @@ def _control_capabilities_for_drone(drone_type: str) -> dict[str, bool]:
             "estop": True,
             "camera_tilt": False,
             "camera_switch": drone_type == "wifi_cam",
+            "speed_control": drone_type == "s2x",
         }
 
     if drone_type == "debug":
@@ -131,6 +133,7 @@ def _control_capabilities_for_drone(drone_type: str) -> dict[str, bool]:
             "estop": False,
             "camera_tilt": False,
             "camera_switch": False,
+            "speed_control": False,
         }
 
     return {
@@ -139,6 +142,7 @@ def _control_capabilities_for_drone(drone_type: str) -> dict[str, bool]:
         "estop": False,
         "camera_tilt": False,
         "camera_switch": False,
+        "speed_control": False,
     }
 
 class FrameHub:
