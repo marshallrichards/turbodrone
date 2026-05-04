@@ -12,7 +12,7 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
     | Brand      | Model Number(s) | Compatibility | Implementation | Motor      | Purchase Link                                               | Notes |
     |------------|-----------------|---------------|----------------|------------|-------------------------------------------------------------|-------|
     | Generic        | M10           | Tested    | `cooingdv` | Brushless | [Aliexpress](https://www.aliexpress.us/item/3256809708895605.html) | My current favorite. RTSP video stream is very reliable. |
-    | Plegble        | PL-515        | Suspected | `s2x`      | Brushless | [Amazon](https://www.amazon.com/dp/B0D2B25YQQ) | Same airframe as the S2x models and takes the same batteries, but upgraded to brushless motors. |
+    | Plegble        | PL-515        | Tested | `s2x`      | Brushless | [Amazon](https://www.amazon.com/dp/B0D2B25YQQ) | Same airframe as the S2x models and takes the same batteries, but upgraded to brushless motors. |
     | Karuisrc       | K417          | Tested    | `wifi_uav` | Brushless | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | First model to be supported with brushless motors. Build quality is great. |
     | Loiley         | S29           | Tested    | `s2x`      | Brushed   | Can't find link anymore | Great build quality, has servo for tilting camera (_not implemented in API yet_) |
     | Hiturbo        | S20           | Tested    | `s2x`      | Brushed   | [Amazon](https://www.amazon.com/dp/B0BBVZ849G), [Alternate Amazon Listing](https://www.amazon.com/Beginners-Foldable-Quadcopter-Gestures-Batteries/dp/B0D8LK1KJ3) | Original test platform, great build quality |
@@ -24,9 +24,9 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
     | Several Brands | E99           | Suspected | `cooingdv` | Brushed   | [Amazon](https://www.amazon.com/LJN53-Foldable-Drone-Dual-Cameras/dp/B0DRH9C6RF) | |
     | Several Brands | E99 Pro       | Suspected | Unknown    | Brushed   | [Amazon](https://www.amazon.com/LJN53-Foldable-Drone-Dual-Cameras/dp/B0DRH9C6RF) | |
     | Swifsen        | A35           | Suspected | Unknown    | Brushed   | [Amazon](https://a.co/d/bqKvloz) | Very small "toy" drone |
-    | Unknown        | LSRC-S1S      | Suspected | `wifi_uav` | Brushed   | | mentioned in another reverse-engineering effort for the WiFi UAV app |
-    | Velcase        | S101          | TODO      | `s2x`      | Brushed   | [Amazon](https://www.amazon.com/Foldable-Beginners-Quadcopter-Carrying-Positioning/dp/B0CH341G5F/) | lower quality build, smaller battery and props than S29 & S20 |
-    | Redrie         | X29           | TODO      | Unknown    | Brushed   | [Amazon](https://www.amazon.com/Adults-1080P-Foldable-Altitude-Auto-Follow-Batteries/dp/B0CZQKNYL5) | Working on this one now |
+    | Unknown        | LSRC-S1S      | Tested | `wifi_uav` | Brushed   | | mentioned in another reverse-engineering effort for the WiFi UAV app |
+    | Velcase        | S101          | TODO      | Unknown      | Brushed   | [Amazon](https://www.amazon.com/Foldable-Beginners-Quadcopter-Carrying-Positioning/dp/B0CH341G5F/) | lower quality build, smaller battery and props than S29 & S20 |
+    | Redrie         | X29           | Tested      | `s2x`    | Brushed   | [Amazon](https://www.amazon.com/Adults-1080P-Foldable-Altitude-Auto-Follow-Batteries/dp/B0CZQKNYL5) | Average build quality |
 
     _**Tested** means the drone has been physically run with turbodrone to ensure its compatibility._
 
