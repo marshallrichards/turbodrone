@@ -7,23 +7,26 @@ Reverse-engineered API and client for controlling some of the best-selling ~$50 
 Nowadays, there are incredibly cheap "toy" drones available on Amazon that are basically pared-down clones of the early DJI mavic. Only ~$50 to have a 1080p camera for FPV and recording, tiny downward-facing optical flow sensor for position and altitude hold, and a well-tuned flight profile out-of-the-box. The only problem with drones like this is that they run closed-source firmware and are locked to only being controlled by a custom mobile app. I thought it would be cool to free some of these drones from their "jail" and write an API and client for accessing the video feed and sending control commands down to the drone by reverse-engineering how the mobile apps work. That way you can turn a highly capable $50 "toy" drone into something that can be programmatically controlled and used for all sorts of applications and experiments.
 
 ## Hardware
-* WiFi Camera Drone (ranked in order of recommendation):
+* WiFi Camera Drones (ranked in order of recommendation):
 
-    | Brand      | Model Number(s)    | Compatibility | Purchase Link                                               | Notes |
-    |------------|-----------------|---------------|-------------------------------------------------------------|-------|
-    | Generic   | M10 | Tested |  [Aliexpress](https://www.aliexpress.us/item/3256809708895605.html) | My current favorite. Brushless motors. RTSP video stream is very reliable. |
-    | Karuisrc | K417 | Tested | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | First model to be supported with brushless motors. Build quality is great. |
-    | Loiley     | S29             | Tested    | Can't find link anymore | Great build quality, has servo for tilting camera(_not implemented in API yet_)|
-    | Hiturbo    | S20             | Tested    | [Amazon](https://www.amazon.com/dp/B0BBVZ849G), [Alternate Amazon Listing](https://www.amazon.com/Beginners-Foldable-Quadcopter-Gestures-Batteries/dp/B0D8LK1KJ3)                  | Original test platform, great build quality|
-    | FlyVista | V88 | Tested | [Amazon](https://www.amazon.com/dp/B0D5CXY6X8) | |
-    | ? | D16/GT3/V66 | Tested | cheapest on [Aliexpress](https://www.aliexpress.us/item/3256808590663347.html), [Amazon](https://www.amazon.com/AUHIFVAX-Intelligent-Avoidance-Christmas-Thanksgiving/dp/B0FJRVH76T) | 20% smaller DJI Neo clone. Only really good for indoor flight. 
-    | Several Brands | E58 | Tested | [Amazon](https://www.amazon.com/Foldable-Quadcopter-Beginners-Batteries-Waypoints/dp/B09KV8L7WN/) |  |
-    | Several Brands | E88/E88 Pro | Suspected | [Amazon](https://www.amazon.com/Beginners-Foldable-Quadcopter-Real-Time-Rechargable/dp/B0FKNH6Q4T) | |
-    | Several Brands | E99/E99 Pro | Suspected | [Amazon](https://www.amazon.com/LJN53-Foldable-Drone-Dual-Cameras/dp/B0DRH9C6RF) | |
-    | Swifsen | A35 | Suspected | [Amazon](https://a.co/d/bqKvloz) | Very small "toy" drone|
-    | Unknown | LSRC-S1S | Suspected | | mentioned in another reverse-engineering effort for the WiFi UAV app|
-    | Velcase    | S101            | TODO | [Amazon](https://www.amazon.com/Foldable-Beginners-Quadcopter-Carrying-Positioning/dp/B0CH341G5F/)  | lower quality build, smaller battery and props than S29 & S20|
-    | Redrie | X29 | TODO | [Amazon](https://www.amazon.com/Adults-1080P-Foldable-Altitude-Auto-Follow-Batteries/dp/B0CZQKNYL5) | Working on this one now|
+    | Brand      | Model Number(s) | Compatibility | Implementation | Motor      | Purchase Link                                               | Notes |
+    |------------|-----------------|---------------|----------------|------------|-------------------------------------------------------------|-------|
+    | Generic        | M10           | Tested    | `cooingdv` | Brushless | [Aliexpress](https://www.aliexpress.us/item/3256809708895605.html) | My current favorite. RTSP video stream is very reliable. |
+    | Plegble        | PL-515        | Suspected | `s2x`      | Brushless | [Amazon](https://www.amazon.com/dp/B0D2B25YQQ) | Same airframe as the S2x models and takes the same batteries, but upgraded to brushless motors. |
+    | Karuisrc       | K417          | Tested    | `wifi_uav` | Brushless | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | First model to be supported with brushless motors. Build quality is great. |
+    | Loiley         | S29           | Tested    | `s2x`      | Brushed   | Can't find link anymore | Great build quality, has servo for tilting camera (_not implemented in API yet_) |
+    | Hiturbo        | S20           | Tested    | `s2x`      | Brushed   | [Amazon](https://www.amazon.com/dp/B0BBVZ849G), [Alternate Amazon Listing](https://www.amazon.com/Beginners-Foldable-Quadcopter-Gestures-Batteries/dp/B0D8LK1KJ3) | Original test platform, great build quality |
+    | FlyVista       | V88           | Tested    | `wifi_uav` | Brushed   | [Amazon](https://www.amazon.com/dp/B0D5CXY6X8) | |
+    | ?              | D16/GT3/V66   | Tested    | `wifi_uav` | Brushed   | cheapest on [Aliexpress](https://www.aliexpress.us/item/3256808590663347.html), [Amazon](https://www.amazon.com/AUHIFVAX-Intelligent-Avoidance-Christmas-Thanksgiving/dp/B0FJRVH76T) | 20% smaller DJI Neo clone. Only really good for indoor flight. |
+    | Several Brands | E58           | Tested    | Unknown    | Brushed   | [Amazon](https://www.amazon.com/Foldable-Quadcopter-Beginners-Batteries-Waypoints/dp/B09KV8L7WN/) | |
+    | Several Brands | E88           | Suspected | `cooingdv` | Brushed   | [Amazon](https://www.amazon.com/Beginners-Foldable-Quadcopter-Real-Time-Rechargable/dp/B0FKNH6Q4T) | |
+    | Several Brands | E88 Pro       | Suspected | Unknown    | Brushed   | [Amazon](https://www.amazon.com/Beginners-Foldable-Quadcopter-Real-Time-Rechargable/dp/B0FKNH6Q4T) | |
+    | Several Brands | E99           | Suspected | `cooingdv` | Brushed   | [Amazon](https://www.amazon.com/LJN53-Foldable-Drone-Dual-Cameras/dp/B0DRH9C6RF) | |
+    | Several Brands | E99 Pro       | Suspected | Unknown    | Brushed   | [Amazon](https://www.amazon.com/LJN53-Foldable-Drone-Dual-Cameras/dp/B0DRH9C6RF) | |
+    | Swifsen        | A35           | Suspected | Unknown    | Brushed   | [Amazon](https://a.co/d/bqKvloz) | Very small "toy" drone |
+    | Unknown        | LSRC-S1S      | Suspected | `wifi_uav` | Brushed   | | mentioned in another reverse-engineering effort for the WiFi UAV app |
+    | Velcase        | S101          | TODO      | `s2x`      | Brushed   | [Amazon](https://www.amazon.com/Foldable-Beginners-Quadcopter-Carrying-Positioning/dp/B0CH341G5F/) | lower quality build, smaller battery and props than S29 & S20 |
+    | Redrie         | X29           | TODO      | Unknown    | Brushed   | [Amazon](https://www.amazon.com/Adults-1080P-Foldable-Altitude-Auto-Follow-Batteries/dp/B0CZQKNYL5) | Working on this one now |
 
     _**Tested** means the drone has been physically run with turbodrone to ensure its compatibility._
 
