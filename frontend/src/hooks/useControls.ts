@@ -21,6 +21,7 @@ export interface CommandCapabilities {
 }
 
 export type SpeedTier = 0 | 1 | 2;
+export type CameraTiltDirection = -1 | 0 | 1;
 /* ─────────────────────────────────────────────────────────── */
 
 export function useControls() {
@@ -29,6 +30,7 @@ export function useControls() {
   /* ------- state refs (mutable) ------- */
   const axesRef = useRef<Axes>({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
   const modeRef = useRef<ControlMode>("inc");
+  const cameraTiltDirectionRef = useRef<CameraTiltDirection>(0);
 
   /* ------- NEW: websocket ref & lifecycle ------- */
   const ws = useRef<WebSocket | null>(null);
@@ -72,6 +74,7 @@ export function useControls() {
     speed_control: false,
   });
   const [speedTier, setSpeedTierSt] = useState<SpeedTier>(2);
+  const [cameraTiltDirection, setCameraTiltDirectionSt] = useState<CameraTiltDirection>(0);
 
   // Track previous gamepad status to avoid spam
   const prevGamepadStatus = useRef<boolean>(false);
@@ -193,6 +196,46 @@ export function useControls() {
     };
   }, [mode]);      // re-run effect when mode flips
 
+  /* --------------- camera tilt keyboard hold ---------------- */
+  useEffect(() => {
+    if (!commandCapabilities.camera_tilt) {
+      cameraTiltDirectionRef.current = 0;
+      setCameraTiltDirectionSt(0);
+      return;
+    }
+
+    const map: Record<string, CameraTiltDirection> = {
+      PageUp: 1,
+      PageDown: -1,
+    };
+
+    const down = (e: KeyboardEvent) => {
+      const direction = map[e.key];
+      if (!direction) return;
+      e.preventDefault();
+      cameraTiltDirectionRef.current = direction;
+      setCameraTiltDirectionSt(direction);
+      maybeStopPluginOnUserInput();
+    };
+
+    const up = (e: KeyboardEvent) => {
+      const direction = map[e.key];
+      if (!direction) return;
+      e.preventDefault();
+      if (cameraTiltDirectionRef.current === direction) {
+        cameraTiltDirectionRef.current = 0;
+        setCameraTiltDirectionSt(0);
+      }
+    };
+
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, [commandCapabilities.camera_tilt]);
+
   /* --------------- Xbox-360 game-pad (absolute) --------- */
   useEffect(() => {
     if (modeRef.current !== "abs") return;          // ignore when in inc mode
@@ -294,6 +337,7 @@ export function useControls() {
       ws.current.send(JSON.stringify({
         type: "axes",
         mode: modeRef.current,
+        camera_tilt_direction: cameraTiltDirectionRef.current,
         ...axesRef.current,
       }));
     }, 1000 / 30);
@@ -339,6 +383,14 @@ export function useControls() {
     setSpeedTierSt(tier);
     setSpeedIndex(tier);
   }, [setSpeedIndex]);
+  const setCameraTiltDirection = (direction: CameraTiltDirection) => {
+    if (!commandCapabilities.camera_tilt) return;
+    cameraTiltDirectionRef.current = direction;
+    setCameraTiltDirectionSt(direction);
+    if (direction !== 0) {
+      maybeStopPluginOnUserInput();
+    }
+  };
 
   /* ------------- hook return ------------------------------- */
   return {
@@ -354,5 +406,7 @@ export function useControls() {
     setSpeedIndex,
     speedTier,
     setSpeedTier,
+    cameraTiltDirection,
+    setCameraTiltDirection,
   };
 }

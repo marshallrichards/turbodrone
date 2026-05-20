@@ -84,6 +84,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self._last_rx_ts = time.time()
         self._stream_started = False
         self._started_once = False
+        self._logged_initial_timeout = False
 
         # Stats
         self.frames_ok = 0
@@ -123,7 +124,7 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
 
     def send_start_command(self) -> None:
         for port in self._target_ports:
-            self._sock.sendto(START_STREAM, (self.drone_ip, port))
+            self._safe_sendto(START_STREAM, port, "START_STREAM")
         self._dbg("[wifi-uav] START_STREAM sent to %s", self._target_ports)
 
     def handle_payload(self, payload: bytes) -> Optional[VideoFrame]:
@@ -227,10 +228,20 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         rqst_b = build_native_ack_packet(command_seq, self._build_ack_slots(frame_id))
 
         for port in self._target_ports:
-            self._sock.sendto(rqst_a, (self.drone_ip, port))
-            self._sock.sendto(rqst_b, (self.drone_ip, port))
+            self._safe_sendto(rqst_a, port, f"REQ_A frame={frame_id}")
+            self._safe_sendto(rqst_b, port, f"REQ_B frame={frame_id}")
         self._last_req_ts = time.time()
         self._dbg("→ REQ %04x to %s", frame_id, self._target_ports)
+
+    def _safe_sendto(self, payload: bytes, port: int, label: str) -> bool:
+        try:
+            self._sock.sendto(payload, (self.drone_ip, port))
+            return True
+        except TimeoutError as exc:
+            logger.warning("[wifi-uav] UDP send timeout for %s to %s:%s: %s", label, self.drone_ip, port, exc)
+        except OSError as exc:
+            logger.warning("[wifi-uav] UDP send failed for %s to %s:%s: %s", label, self.drone_ip, port, exc)
+        return False
 
     def _build_ack_slots(self, seq: int) -> list[bytes]:
         return self._ack_state.build_ack_slots(seq)
@@ -355,7 +366,18 @@ class WifiUavVideoProtocolAdapter(BaseVideoProtocolAdapter):
         if self._stream_started:
             return (now - self._last_rx_ts) < self.LINK_STALL_TIMEOUT
 
-        return (now - self._last_rx_ts) < self.INITIAL_STREAM_TIMEOUT
+        initial_alive = (now - self._last_rx_ts) < self.INITIAL_STREAM_TIMEOUT
+        if not initial_alive and not self._logged_initial_timeout:
+            self._logged_initial_timeout = True
+            logger.warning(
+                "[wifi-uav] No initial video packets received after %.1fs "
+                "(variant=%s, target_ports=%s, local_port=%s)",
+                self.INITIAL_STREAM_TIMEOUT,
+                self.variant,
+                self._target_ports,
+                self._sock.getsockname()[1],
+            )
+        return initial_alive
 
     def get_frame(self, timeout: float = 1.0) -> Optional[VideoFrame]:
         try:

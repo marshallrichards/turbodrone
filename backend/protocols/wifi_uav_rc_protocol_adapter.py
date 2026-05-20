@@ -129,18 +129,32 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
 
         # ----- controls -------------------------------------------------
         speed_index = max(0, min(3, int(getattr(drone_model, "speed_index", 2))))
-        controls: List[int] = [
-            self._apply_speed_scale(drone_model.roll, speed_index),
-            self._apply_speed_scale(drone_model.pitch, speed_index),
-            self._apply_speed_scale(drone_model.throttle, speed_index),
-            self._apply_speed_scale(drone_model.yaw, speed_index),
+        if self.capabilities.transport == "fld_compat":
+            axis_controls = [
+                self._apply_speed_scale(drone_model.roll, speed_index),
+                self._apply_speed_scale(drone_model.pitch, speed_index),
+                self._apply_speed_scale(drone_model.throttle, 2),
+                self._apply_speed_scale(drone_model.yaw, speed_index),
+            ]
+            axis_labels = ("R", "P", "T", "Y")
+        else:
+            axis_controls = [
+                self._apply_speed_scale(drone_model.yaw, speed_index),
+                self._apply_speed_scale(drone_model.pitch, speed_index),
+                self._apply_speed_scale(drone_model.throttle, 2),
+                self._apply_speed_scale(drone_model.roll, speed_index),
+            ]
+            axis_labels = ("Y", "P", "T", "R")
+
+        controls: List[int] = axis_controls + [
             command & 0xFF,
             headless & 0xFF,
         ]
 
-        # Stash for debug printing at send time (roll, pitch, throttle, yaw)
+        # Stash for debug printing at send time.
         try:
             self._last_controls = tuple(controls[:4])
+            self._last_axis_labels = axis_labels
             self._last_command = command & 0xFF
             self._last_headless = headless & 0xFF
         except Exception:
@@ -192,9 +206,11 @@ class WifiUavRcProtocolAdapter(BaseProtocolAdapter):
             print(f"[wifi-uav] #{self._pkt_counter:05d}   "
                   f"{' '.join(f'{b:02x}' for b in packet[:40])} …")
             try:
-                r, p, t, y = getattr(self, "_last_controls", (None, None, None, None))
-                if None not in (r, p, t, y):
-                    print(f"[wifi-uav] controls R:{r} P:{p} T:{t} Y:{y}")
+                controls = getattr(self, "_last_controls", None)
+                labels = getattr(self, "_last_axis_labels", None)
+                if controls and labels:
+                    decoded = " ".join(f"{label}:{value}" for label, value in zip(labels, controls))
+                    print(f"[wifi-uav] controls {decoded}")
                 command = getattr(self, "_last_command", None)
                 if command is not None:
                     flags = []

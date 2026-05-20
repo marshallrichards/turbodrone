@@ -145,6 +145,41 @@ def _control_capabilities_for_drone(drone_type: str) -> dict[str, bool]:
         "speed_control": False,
     }
 
+def _coerce_camera_tilt_state(data: dict[str, Any]) -> Optional[int]:
+    """
+    Convert frontend-facing tilt directions into the model's raw tilt state.
+
+    The UI sends direction values where +1 means tilt up and -1 means tilt down.
+    WiFi-UAV's decompiled PTZ field uses 0=neutral, 1=down, 2=up.
+    """
+    if "camera_tilt_direction" in data:
+        try:
+            direction = float(data.get("camera_tilt_direction", 0))
+        except (TypeError, ValueError):
+            return None
+        if direction > 0:
+            return 2
+        if direction < 0:
+            return 1
+        return 0
+
+    if "camera_tilt" in data:
+        try:
+            return max(0, min(2, int(data.get("camera_tilt", 0))))
+        except (TypeError, ValueError):
+            return None
+
+    return None
+
+def _apply_camera_tilt_command(model: Any, data: dict[str, Any]) -> None:
+    tilt_state = _coerce_camera_tilt_state(data)
+    if tilt_state is None:
+        return
+
+    setter = getattr(model, "set_camera_tilt_state", None)
+    if callable(setter):
+        setter(tilt_state)
+
 class FrameHub:
     """
     Fan-out hub for MJPEG frames.
@@ -248,7 +283,7 @@ async def lifespan(app: FastAPI):
             "control_port": ctrl_port,
             "video_port": video_port,
             "variant": wifi_uav_variant,
-            "debug": False,
+            "debug": os.getenv("WIFI_UAV_VIDEO_DEBUG", "false").lower() in ("1", "true", "yes", "on"),
         }
     elif drone_type in COOINGDV_DRONE_TYPES:
         logger.info("[main] Using Cooingdv drone implementation (RC UFO, KY UFO, E88 Pro).")
@@ -539,6 +574,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     roll     = float(data.get("roll", 0))
                     
                     flight_controller.set_axes_from("frontend", throttle, yaw, pitch, roll)
+                    _apply_camera_tilt_command(flight_controller.model, data)
             elif msg_type == "set_profile":
                 try:
                     flight_controller.model.set_profile(data.get("name", "normal"))
@@ -567,6 +603,11 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                         flight_controller.model.stop_flag = True
                     except Exception:
                         pass
+            elif msg_type in ("set_camera_tilt", "camera_tilt"):
+                try:
+                    _apply_camera_tilt_command(flight_controller.model, data)
+                except Exception:
+                    pass
     except WebSocketDisconnect:
         logger.info("[WebSocket] Client disconnected")
     except Exception as e:

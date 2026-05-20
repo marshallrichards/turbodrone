@@ -20,9 +20,9 @@ class WifiUavRcModel(BaseRCModel):
       be tuned per drone via STICK_RANGE.
     """
 
-    #            min, mid, max
-    # STICK_RANGE = StickRange(0, 128, 255)
-    STICK_RANGE = StickRange(40, 128, 220)
+    # Match the decompiled app's `xx.h()` output range. Speed tiers apply after
+    # the model maps normalized control input into this full byte range.
+    STICK_RANGE = StickRange(0, 128, 255)
 
     PRESETS = {
         # name         accel   decel  expo  immediate-boost

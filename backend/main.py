@@ -163,6 +163,7 @@ def main():
                 "control_port": control_port,
                 "video_port": video_port,
                 "variant": wifi_uav_variant,
+                "debug": os.getenv("WIFI_UAV_VIDEO_DEBUG", "false").lower() in ("1", "true", "yes", "on"),
             }
         elif args.drone_type in COOINGDV_DRONE_TYPES:
             video_protocol_args = {

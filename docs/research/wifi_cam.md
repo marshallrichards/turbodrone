@@ -136,6 +136,39 @@ switchCmd  = 42 79
 creation and sends `stopCmd` when disconnecting. `iCameraRoate()` sends
 `rotateCmd`; `iCameraSwitch()` sends `switchCmd`.
 
+## Camera Tilt / Servo Findings
+
+No confirmed camera-tilt/PTZ/servo command was found in the WiFi_CAM Java or
+native paths reviewed so far.
+
+The camera-named native commands are limited to:
+
+- `Camera.iCameraRoate()` / `Socket::writeRotateCmd()` -> `42 78` on UDP
+  `8080`.
+- `Camera.iCameraSwitch()` / `Socket::writeCameraSwitch()` -> `42 79` on UDP
+  `8080`.
+
+The UI wiring suggests these are not camera pitch-servo controls:
+
+- `btnCameraSwitch` calls `Camera.iCameraSwitch()` and is guarded by the
+  camera-type probe, matching a front/back or dual-camera switch.
+- `btnPlayRev` calls `Camera.iCameraRoate()` and uses `zone_rotate_180` assets,
+  consistent with rotating/flipping the camera image orientation.
+- `btnPlayRoate` toggles `ICmd_SetRotate(...)`; in `BaseCmd` this only sets the
+  existing rotate/circle-turn RC flag (`0x08` in the short packet or byte `6`
+  bit `3` in the 20-byte packet). While active, the right stick selects a
+  flip/rotation direction through normal roll/pitch fields.
+- `playLeftSlider`, `playRightSlider`, and `playCenterSlider` feed
+  `ICmd_SetTune(...)`, which adjusts yaw/roll/pitch trim values before they are
+  written into the normal RC axes.
+
+Native string/function searches under the WiFi_CAM `libCamera.so` decompile did
+not surface `ptz`, `tilt`, `servo`, `gimbal`, or similar command names. If a
+WiFi_CAM-compatible drone has a physical camera tilt servo, it is not exposed by
+an obvious control in this app build. A capture while using the stock app is
+still the best way to verify whether any non-obvious packet changes when a tilt
+control is used.
+
 ## Camera Type Probe
 
 After sending `startCmd`, `udpSocketEnterance` waits for an 8-byte response from

@@ -31,7 +31,7 @@ _VARIANT_CAPABILITIES: Final[dict[str, WifiUavCapabilities]] = {
     "fld": WifiUavCapabilities(
         variant="fld",
         transport="fld_compat",
-        supports_camera_tilt=False,
+        supports_camera_tilt=True,
         supports_camera_switch=False,
         video_ports=(8800,),
         rc_command_shape="native_ack_embedded",
@@ -61,9 +61,10 @@ def resolve_wifi_uav_variant(drone_type: str) -> str:
     """
     Resolve the effective wifi_uav transport variant.
 
-    Explicit DRONE_TYPE aliases win. For the umbrella `wifi_uav` type, prefer a
-    best-effort SSID-based choice and otherwise fall back to the legacy/default
-    path, which today is closest to the FLD-style transport.
+    Explicit DRONE_TYPE aliases win. The umbrella `wifi_uav` type stays on the
+    legacy/default FLD-compatible path because both K417 and D16/FLOW hardware
+    have worked there, while the native UAVSDK-shaped split remains available as
+    `DRONE_TYPE=wifi_uav_uav` for experiments.
     """
     explicit = wifi_uav_variant_from_drone_type(drone_type)
     if explicit != "auto":
@@ -94,7 +95,7 @@ def map_wifi_uav_variant_from_ssid(ssid: str | None) -> str | None:
 
     normalised = ssid.strip().lower()
     if any(normalised.startswith(prefix) for prefix in _UAV_PREFIXES):
-        return "uav"
+        return "fld"
     if any(normalised.startswith(prefix) for prefix in _FLD_PREFIXES):
         return "fld"
     return None

@@ -1,17 +1,20 @@
 import AxisIndicator from "./AxisIndicator";
-import type { Axes, CommandCapabilities, SpeedTier } from "../hooks/useControls";
+import type { Axes, CameraTiltDirection, CommandCapabilities, SpeedTier } from "../hooks/useControls";
 import CommandButtons from "./CommandButtons";
 import SpeedControl from "./SpeedControl";
+import CameraTiltControl from "./CameraTiltControl";
 
 interface ControlsOverlayProps {
   axes: Axes;
   droneType: string;
   commandCapabilities: CommandCapabilities;
   speedTier: SpeedTier;
+  cameraTiltDirection: CameraTiltDirection;
   onTakeoff: () => void;
   onLand: () => void;
   onEstop: () => void;
   onSpeedChange: (tier: SpeedTier) => void;
+  onCameraTiltChange: (direction: CameraTiltDirection) => void;
 }
 
 export default function ControlsOverlay({
@@ -19,10 +22,12 @@ export default function ControlsOverlay({
   droneType,
   commandCapabilities,
   speedTier,
+  cameraTiltDirection,
   onTakeoff,
   onLand,
   onEstop,
   onSpeedChange,
+  onCameraTiltChange,
 }: ControlsOverlayProps) {
   const left   = { x: axes.roll,     y: axes.pitch };
   const right  = { x: axes.yaw,      y: axes.throttle };
@@ -62,6 +67,13 @@ export default function ControlsOverlay({
             enabled={commandCapabilities.speed_control}
             value={speedTier}
             onChange={onSpeedChange}
+          />
+        )}
+
+        {commandCapabilities.camera_tilt && (
+          <CameraTiltControl
+            activeDirection={cameraTiltDirection}
+            onTiltChange={onCameraTiltChange}
           />
         )}
 
