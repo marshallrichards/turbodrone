@@ -30,9 +30,18 @@ class FFmpegH265ToJpegDecoder:
     SOI: Final = b"\xff\xd8"
     EOI: Final = b"\xff\xd9"
 
-    def __init__(self, *, ffmpeg_bin: str = "ffmpeg", jpeg_quality: int = 5) -> None:
+    def __init__(
+        self,
+        *,
+        ffmpeg_bin: str = "ffmpeg",
+        jpeg_quality: int = 12,
+        output_width: int = 640,
+        output_fps: int = 15,
+    ) -> None:
         self.ffmpeg_bin = ffmpeg_bin
         self.jpeg_quality = int(jpeg_quality)
+        self.output_width = int(output_width)
+        self.output_fps = int(output_fps)
         self._proc: Optional[subprocess.Popen] = None
         self._reader_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
@@ -99,6 +108,11 @@ class FFmpegH265ToJpegDecoder:
                 "-i",
                 "pipe:0",
                 "-an",
+            ]
+            filters = self._video_filters()
+            if filters:
+                cmd.extend(["-vf", filters])
+            cmd.extend([
                 "-c:v",
                 "mjpeg",
                 "-f",
@@ -106,7 +120,7 @@ class FFmpegH265ToJpegDecoder:
                 "-q:v",
                 str(self.jpeg_quality),
                 "pipe:1",
-            ]
+            ])
             try:
                 self._proc = subprocess.Popen(
                     cmd,
@@ -135,6 +149,14 @@ class FFmpegH265ToJpegDecoder:
             )
             self._stderr_thread.start()
             return self._proc
+
+    def _video_filters(self) -> str:
+        filters: list[str] = []
+        if self.output_width > 0:
+            filters.append(f"scale={self.output_width}:-2:flags=fast_bilinear")
+        if self.output_fps > 0:
+            filters.append(f"fps={self.output_fps}")
+        return ",".join(filters)
 
     def _read_stdout(self, proc: subprocess.Popen) -> None:
         stdout = proc.stdout
@@ -218,6 +240,9 @@ class X69LgVideoProtocolAdapter(BaseVideoProtocolAdapter):
         *,
         local_control_port: int = DEFAULT_LOCAL_CONTROL_PORT,
         decoder: Optional[H265Decoder] = None,
+        jpeg_quality: int = 12,
+        output_width: int = 640,
+        output_fps: int = 15,
         debug: bool = False,
     ) -> None:
         super().__init__(drone_ip, control_port, video_port)
@@ -232,7 +257,11 @@ class X69LgVideoProtocolAdapter(BaseVideoProtocolAdapter):
         self._pkt_lock = threading.Lock()
         self._pkt_buffer: list[bytes] = []
         self._assemblies: dict[int, _FrameAssembly] = {}
-        self._decoder = decoder or FFmpegH265ToJpegDecoder()
+        self._decoder = decoder or FFmpegH265ToJpegDecoder(
+            jpeg_quality=jpeg_quality,
+            output_width=output_width,
+            output_fps=output_fps,
+        )
         self._frame_id = 0
         self._last_complete_h265 = time.monotonic()
         self._last_decoded_jpeg = time.monotonic()

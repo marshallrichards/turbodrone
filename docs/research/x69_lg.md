@@ -140,6 +140,15 @@ pipeline needs normal buffering (`-fflags +genpts`) rather than the earlier
 low-latency/nobuffer settings; the latter produced only the first JPEG and then
 FFmpeg missed reference frames.
 
+The backend transcodes to smaller MJPEG frames for the web UI. Defaults:
+
+- `X69_LG_OUTPUT_WIDTH=640`
+- `X69_LG_OUTPUT_FPS=15`
+- `X69_LG_JPEG_QUALITY=12`
+
+For FFmpeg's MJPEG encoder, lower `q:v` means higher quality/larger frames and
+higher values mean fuzzier/smaller frames.
+
 Native `libudpcmdtool.so` confirms the Java command-byte helpers:
 
 - Open stream command, sent to `172.16.11.1:23459`:

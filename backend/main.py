@@ -149,6 +149,9 @@ def main():
         video_port = args.video_port if args.video_port else default_video_port
         x69_video_control_port = int(os.getenv("X69_LG_VIDEO_CONTROL_PORT", default_video_control_port))
         x69_local_video_control_port = int(os.getenv("X69_LG_LOCAL_VIDEO_CONTROL_PORT", 23459))
+        x69_jpeg_quality = int(os.getenv("X69_LG_JPEG_QUALITY", 12))
+        x69_output_width = int(os.getenv("X69_LG_OUTPUT_WIDTH", 640))
+        x69_output_fps = int(os.getenv("X69_LG_OUTPUT_FPS", 15))
 
         drone_model = X69LgRcModel()
         protocol_adapter = X69LgRcProtocolAdapter(
@@ -209,6 +212,9 @@ def main():
                 "control_port": x69_video_control_port,
                 "video_port": video_port,
                 "local_control_port": x69_local_video_control_port,
+                "jpeg_quality": x69_jpeg_quality,
+                "output_width": x69_output_width,
+                "output_fps": x69_output_fps,
                 "debug": os.getenv("X69_LG_VIDEO_DEBUG", "false").lower() in ("1", "true", "yes", "on"),
             }
         

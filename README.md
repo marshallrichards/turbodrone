@@ -91,7 +91,11 @@ DRONE_TYPE=s2x
 
 `x69_lg` video requires the `ffmpeg` executable to be available on `PATH`
 because the drone sends H.265 frames that the backend converts to JPEG for the
-existing MJPEG web stream.
+existing MJPEG web stream. Its default video output is tuned for lower latency:
+`X69_LG_OUTPUT_WIDTH=640`, `X69_LG_OUTPUT_FPS=15`, and
+`X69_LG_JPEG_QUALITY=12`. The drone's native stream is 1280x720 H.265. Lower
+JPEG quality numbers are better-looking/larger; larger values are
+fuzzier/smaller.
 
 Launch the backend: 
 ```

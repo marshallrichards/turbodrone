@@ -372,6 +372,9 @@ async def lifespan(app: FastAPI):
         local_port = int(os.getenv("X69_LG_LOCAL_CONTROL_PORT", 0))
         video_control_port = int(os.getenv("X69_LG_VIDEO_CONTROL_PORT", default_video_control_port))
         local_video_control_port = int(os.getenv("X69_LG_LOCAL_VIDEO_CONTROL_PORT", 23459))
+        x69_jpeg_quality = int(os.getenv("X69_LG_JPEG_QUALITY", 12))
+        x69_output_width = int(os.getenv("X69_LG_OUTPUT_WIDTH", 640))
+        x69_output_fps = int(os.getenv("X69_LG_OUTPUT_FPS", 15))
 
         model = X69LgRcModel()
         rc_proto = X69LgRcProtocolAdapter(drone_ip, ctrl_port, local_port=local_port)
@@ -381,6 +384,9 @@ async def lifespan(app: FastAPI):
             "control_port": video_control_port,
             "video_port": video_port,
             "local_control_port": local_video_control_port,
+            "jpeg_quality": x69_jpeg_quality,
+            "output_width": x69_output_width,
+            "output_fps": x69_output_fps,
             "debug": os.getenv("X69_LG_VIDEO_DEBUG", "false").lower() in ("1", "true", "yes", "on"),
         }
     elif drone_type == "debug":
