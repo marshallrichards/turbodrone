@@ -34,6 +34,9 @@ from protocols.cooingdv_video_protocol import CooingdvVideoProtocolAdapter
 from models.wifi_cam_rc import WifiCamRcModel
 from protocols.wifi_cam_rc_protocol_adapter import WifiCamRcProtocolAdapter
 from protocols.wifi_cam_video_protocol import WifiCamVideoProtocolAdapter
+from models.x69_lg_rc import X69LgRcModel
+from protocols.x69_lg_rc_protocol_adapter import X69LgRcProtocolAdapter
+from protocols.x69_lg_video_protocol import X69LgVideoProtocolAdapter
 from plugins.manager import PluginManager
 from utils.dropping_queue import DroppingQueue
 from utils.wifi_uav_variants import (
@@ -124,6 +127,16 @@ def _control_capabilities_for_drone(drone_type: str) -> dict[str, bool]:
             "camera_tilt": False,
             "camera_switch": drone_type == "wifi_cam",
             "speed_control": drone_type == "s2x",
+        }
+
+    if drone_type == "x69_lg":
+        return {
+            "takeoff": True,
+            "land": True,
+            "estop": True,
+            "camera_tilt": True,
+            "camera_switch": False,
+            "speed_control": True,
         }
 
     if drone_type == "debug":
@@ -344,6 +357,31 @@ async def lifespan(app: FastAPI):
             "control_port": ctrl_port,
             "video_port": video_port,
             "debug": os.getenv("WIFI_CAM_VIDEO_DEBUG", "false").lower() in ("1", "true", "yes", "on"),
+        }
+    elif drone_type == "x69_lg":
+        logger.info("[main] Using X69/LG UDP implementation.")
+        default_ip = "172.16.11.1"
+        default_ctrl_port = 23458
+        default_video_port = 1234
+        default_video_control_port = 23459
+        default_control_rate = 25.0
+
+        drone_ip = os.getenv("DRONE_IP", default_ip)
+        ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
+        video_port = int(os.getenv("VIDEO_PORT", default_video_port))
+        local_port = int(os.getenv("X69_LG_LOCAL_CONTROL_PORT", 0))
+        video_control_port = int(os.getenv("X69_LG_VIDEO_CONTROL_PORT", default_video_control_port))
+        local_video_control_port = int(os.getenv("X69_LG_LOCAL_VIDEO_CONTROL_PORT", 23459))
+
+        model = X69LgRcModel()
+        rc_proto = X69LgRcProtocolAdapter(drone_ip, ctrl_port, local_port=local_port)
+        video_adapter_cls = X69LgVideoProtocolAdapter
+        video_adapter_args = {
+            "drone_ip": drone_ip,
+            "control_port": video_control_port,
+            "video_port": video_port,
+            "local_control_port": local_video_control_port,
+            "debug": os.getenv("X69_LG_VIDEO_DEBUG", "false").lower() in ("1", "true", "yes", "on"),
         }
     elif drone_type == "debug":
         logger.info("[main] Using debug drone implementation.")

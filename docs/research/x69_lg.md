@@ -23,6 +23,19 @@ native socket code to a different network target and uses a different video
 transport. Treat it as `x69_lg` / `lg_udp` research until captures prove a
 closer reusable backend boundary.
 
+TurboDrone implementation status:
+
+- `DRONE_TYPE=x69_lg`
+- RC/control implemented in:
+  - `backend/models/x69_lg_rc.py`
+  - `backend/protocols/x69_lg_rc_protocol_adapter.py`
+- Camera tilt/servo direction bits are implemented.
+- Video is implemented experimentally in:
+  - `backend/protocols/x69_lg_video_protocol.py`
+- The video adapter sends the native stream commands, reassembles H.265 frames
+  from UDP `1234`, and pipes them through `ffmpeg` to produce JPEG frames for the
+  existing MJPEG web pipeline.
+
 ## Existing Implementation Fit
 
 Current TurboDrone fit:
@@ -120,11 +133,37 @@ mediacodecInit(2, 1280, 720, null, null, null)
 ```
 
 So this app's active UDP video path is H.265-oriented, not S2x JPEG chunking.
+TurboDrone's `x69_lg` adapter reassembles these H.265 frames and runs them
+through `ffmpeg` as an HEVC bytestream. Offline testing of
+`dumps_x69/x69_capture_20260519_231654.h265` decoded successfully. The live
+pipeline needs normal buffering (`-fflags +genpts`) rather than the earlier
+low-latency/nobuffer settings; the latter produced only the first JPEG and then
+FFmpeg missed reference frames.
+
+Native `libudpcmdtool.so` confirms the Java command-byte helpers:
+
+- Open stream command, sent to `172.16.11.1:23459`:
+
+  ```text
+  a8 8a 20 00 08 00 00 00 01 00 02 00 00 00 d2 04
+  ```
+
+- Close stream command, sent to `172.16.11.1:23459`:
+
+  ```text
+  a8 8a 21 00 06 00 00 00 01 00 00 00 00 00
+  ```
+
+- I-frame request command, sent to `172.16.11.1:23459`:
+
+  ```text
+  a8 8a 24 00 02 00 00 00 01 00
+  ```
 
 ## Active RC Packet
 
-`MainActivityUDP` sets `f960r0 = true`, so the active packet is `U`, a 20-byte
-optical-flow packet:
+`MainActivityUDP` sets `f960r0 = true`, so the active RC payload is `U`, a
+20-byte optical-flow packet:
 
 ```text
 66 14 RR PP TT YY F1 F2 00 00 00 00 00 00 00 00 00 00 XX 99
@@ -146,6 +185,25 @@ Initialization in `MainActivityUDP`:
 
 This shape is very close to Macrochip/S2x HY packets, but the app owns it
 through LG native socket code and assigns different meaning to byte `7`.
+
+Native `libnative_socket.so` confirms that this 20-byte payload is not sent raw.
+`JNICMD.sendControlData(...)` wraps it before UDP transmit:
+
+```text
+ca 47 d5 00 14 00 00 00 <20-byte 66 14 ... 99 payload>
+```
+
+The wrapped 28-byte control datagram is sent to:
+
+```text
+172.16.11.1:23458
+```
+
+`JNICMD.SendD1()` sends a once-per-second keepalive to the same destination:
+
+```text
+ca 47 d1 00 00 00 00 00
+```
 
 Known active flag bits:
 
@@ -196,9 +254,23 @@ The decompile references these app-specific/native libraries:
 - `mjpegdec` via `com.lg.drone.PictureAndVideoUtil`
 - `yuvutil`, `ffplay-lib`, `opencv_api`, IJK, and other media helpers
 
-The unpacked `resources/config.arm64_v8a.apk` split only contains metadata in
-this workspace, not extracted `.so` files. Full native transport details will
-require recovering the ABI split libraries.
+Native analysis status:
+
+- Ghidra 12.0.4 and reusable headless scripts are available under `tools/`.
+- `libnative_socket.so` and `libudpcmdtool.so` were analyzed with Ghidra
+  headless.
+- Outputs:
+  - `tools/ghidra_out/x69_libnative_socket_functions_all.txt`
+  - `tools/ghidra_out/x69_libnative_socket_decompiled/`
+  - `tools/ghidra_out/x69_libudpcmdtool_functions_all.txt`
+  - `tools/ghidra_out/x69_libudpcmdtool_decompiled/`
+
+Remaining native follow-ups:
+
+- `libprotocolparse.so` / `libtrinityprotocolparse.so`: alternate protocol
+  packet wrappers and whether they share the same servo bits as `MainActivityUDP`.
+- Additional H.265 tuning if live testing shows latency or reference-frame
+  issues on other firmware revisions.
 
 ## Alternate / Legacy Paths
 
@@ -225,9 +297,10 @@ For implementation work later, capture:
   `4` on real hardware.
 - Takeoff, landing, calibration, photo, record, and flip packets to complete the
   flag table.
-- UDP `1234` stream packets to confirm the 32-byte `c6 6c a5 5a` header and H.265
-  frame payload behavior.
-- Native `native_socket` send destination/port if the `.so` files are recovered.
+- Longer video captures from multiple flights to tune buffering/latency and
+  confirm that the 32-byte `c6 6c a5 5a` header remains stable.
+- `libprotocolparse.so` and `libtrinityprotocolparse.so` details for alternate
+  app paths if those modes prove active on other firmware.
 
-Potential future backend name: `x69_lg` or `lg_udp`.
+Backend name selected: `x69_lg`.
 

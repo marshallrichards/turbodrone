@@ -28,6 +28,9 @@ from protocols.cooingdv_video_protocol import CooingdvVideoProtocolAdapter
 from models.wifi_cam_rc import WifiCamRcModel
 from protocols.wifi_cam_rc_protocol_adapter import WifiCamRcProtocolAdapter
 from protocols.wifi_cam_video_protocol import WifiCamVideoProtocolAdapter
+from models.x69_lg_rc import X69LgRcModel
+from protocols.x69_lg_rc_protocol_adapter import X69LgRcProtocolAdapter
+from protocols.x69_lg_video_protocol import X69LgVideoProtocolAdapter
 
 from services.flight_controller import FlightController
 from services.video_receiver import VideoReceiverService
@@ -44,10 +47,10 @@ logger = logging.getLogger(__name__)
 def main():
     parser = argparse.ArgumentParser(description="Drone teleoperation interface")
     parser.add_argument("--drone-type", type=str, default="s2x",
-                        choices=["s2x", "wifi_uav", "wifi_uav_fld", "wifi_uav_uav", "cooingdv", "cooingdv_jieli", "wifi_cam"],
-                        help="Type of drone to control (s2x, wifi_uav, wifi_uav_fld, wifi_uav_uav, cooingdv, cooingdv_jieli, or wifi_cam, default: s2x)")
+                        choices=["s2x", "wifi_uav", "wifi_uav_fld", "wifi_uav_uav", "cooingdv", "cooingdv_jieli", "wifi_cam", "x69_lg"],
+                        help="Type of drone to control (s2x, wifi_uav, wifi_uav_fld, wifi_uav_uav, cooingdv, cooingdv_jieli, wifi_cam, or x69_lg, default: s2x)")
     parser.add_argument("--drone-ip", type=str,
-                        help="Drone UDP IP address (default: s2x=172.16.10.1, wifi_uav=192.168.169.1, cooingdv=192.168.1.1, wifi_cam=192.168.4.153)")
+                        help="Drone UDP IP address (default: s2x=172.16.10.1, wifi_uav=192.168.169.1, cooingdv=192.168.1.1, wifi_cam=192.168.4.153, x69_lg=172.16.11.1)")
     parser.add_argument("--control-port", type=int,
                         help="Drone control port (default: s2x=8080, wifi_uav=8800)")
     parser.add_argument("--video-port", type=int,
@@ -133,6 +136,27 @@ def main():
             command_mode=os.getenv("WIFI_CAM_COMMAND_MODE", "auto"),
         )
         video_protocol_adapter_class = WifiCamVideoProtocolAdapter
+    elif args.drone_type == "x69_lg":
+        logger.info("[main] Using X69/LG UDP implementation.")
+        default_ip = "172.16.11.1"
+        default_control_port = 23458
+        default_video_port = 1234
+        default_video_control_port = 23459
+        default_rate = 25.0
+
+        drone_ip = args.drone_ip if args.drone_ip else default_ip
+        control_port = args.control_port if args.control_port else default_control_port
+        video_port = args.video_port if args.video_port else default_video_port
+        x69_video_control_port = int(os.getenv("X69_LG_VIDEO_CONTROL_PORT", default_video_control_port))
+        x69_local_video_control_port = int(os.getenv("X69_LG_LOCAL_VIDEO_CONTROL_PORT", 23459))
+
+        drone_model = X69LgRcModel()
+        protocol_adapter = X69LgRcProtocolAdapter(
+            drone_ip,
+            control_port,
+            local_port=int(os.getenv("X69_LG_LOCAL_CONTROL_PORT", 0)),
+        )
+        video_protocol_adapter_class = X69LgVideoProtocolAdapter
     else:
         # Should not happen due to choices in argparse
         logger.error("[main] Unknown drone type: %s", args.drone_type)
@@ -178,6 +202,14 @@ def main():
                 "drone_ip": drone_ip,
                 "control_port": control_port,
                 "video_port": video_port,
+            }
+        elif args.drone_type == "x69_lg":
+            video_protocol_args = {
+                "drone_ip": drone_ip,
+                "control_port": x69_video_control_port,
+                "video_port": video_port,
+                "local_control_port": x69_local_video_control_port,
+                "debug": os.getenv("X69_LG_VIDEO_DEBUG", "false").lower() in ("1", "true", "yes", "on"),
             }
         
         frame_queue = queue.Queue(maxsize=100)

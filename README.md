@@ -16,6 +16,7 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
     | Karuisrc       | K417          | Tested    | `wifi_uav` | Brushless | [Amazon](https://www.amazon.com/Electric-Adjustable-AIdrones-Quadcopter-Beginners/dp/B0CYPSJ34H/) | First model to be supported with brushless motors. Build quality is great. |
     | Loiley         | S29           | Tested    | `s2x`      | Brushed   | Can't find link anymore | Great build quality, has servo for tilting camera (_not implemented in API yet_) |
     | Hiturbo        | S20           | Tested    | `s2x`      | Brushed   | [Amazon](https://www.amazon.com/dp/B0BBVZ849G), [Alternate Amazon Listing](https://www.amazon.com/Beginners-Foldable-Quadcopter-Gestures-Batteries/dp/B0D8LK1KJ3) | Original test platform, great build quality |
+    | Loiley         | X69           | Untested  | `x69_lg`   | Brushed   | [Amazon](https://www.amazon.com/Altitude-Adjustment-Headless-Batteries-Beginner/dp/B0F8QTBGNP) | New LG/X69 app family; RC, camera tilt, and experimental FFmpeg-backed H.265 video implemented. |
     | FlyVista       | V88           | Tested    | `wifi_uav` | Brushed   | [Amazon](https://www.amazon.com/dp/B0D5CXY6X8) | |
     | ?              | D16/GT3/V66   | Tested    | `wifi_uav` | Brushed   | cheapest on [Aliexpress](https://www.aliexpress.us/item/3256808590663347.html), [Amazon](https://www.amazon.com/AUHIFVAX-Intelligent-Avoidance-Christmas-Thanksgiving/dp/B0FJRVH76T) | 20% smaller DJI Neo clone. Only really good for indoor flight. |
     | Several Brands | E58           | Tested    | Unknown    | Brushed   | [Amazon](https://www.amazon.com/Foldable-Quadcopter-Beginners-Batteries-Waypoints/dp/B09KV8L7WN/) | |
@@ -31,6 +32,8 @@ Nowadays, there are incredibly cheap "toy" drones available on Amazon that are b
     _**Tested** means the drone has been physically run with turbodrone to ensure its compatibility._
 
   _**Suspected** means the APK for the drone appears to use the exact same packages and libraries as one of the tested drones._
+
+  _**Untested** means the APK has been reverse engineered and implementation code exists, but the drone has not yet been physically flown with TurboDrone._
 
   _**TODO** means the APK operates with different byte packets and protocols and will have to be added as a new implementation in the API._
 
@@ -82,7 +85,13 @@ DRONE_TYPE=s2x
 # DRONE_TYPE=cooingdv_jieli
 # For WiFi_CAM native UDP apps:
 # DRONE_TYPE=wifi_cam
+# For Loiley X69 / com.lg.drone apps:
+# DRONE_TYPE=x69_lg
 ```
+
+`x69_lg` video requires the `ffmpeg` executable to be available on `PATH`
+because the drone sends H.265 frames that the backend converts to JPEG for the
+existing MJPEG web stream.
 
 Launch the backend: 
 ```
