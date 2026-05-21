@@ -7,6 +7,80 @@ This note captures findings from the decompiled WiFi-UAV Android app in
 The main takeaway is that "WiFi-UAV" is a drone family, not one protocol.
 The app routes different SSID families to different backend SDKs.
 
+The later FLD Pro app in `decompiled-fld-pro-1.0.8` shares the same publisher,
+SSID dispatcher shape, and `lxSigPro` / `UAVSDK` transport wrappers, but its
+manual RC builders are different from WiFi-UAV's `xx.f()` / `xx.g()` packets.
+See `docs/research/fld_pro.md` for the PTZ/camera-tilt findings and the
+separate `hm` / `sz` packet layouts.
+
+The 4DRC Air app in `decompiled-4drc-air-1.0.2` is different: it is a rebadged
+WiFi-UAV-style app and uses the same manual RC packet family as this note.
+
+## Rebadged 4DRC Air App
+
+4DRC Air app identity:
+
+```text
+package=com.lcfld.app4drc
+versionName=1.0.2
+versionCode=8
+app_name=4DRC Air
+main flight screen=com.tomdxs.camtechfpv.NewControlActivity
+```
+
+The Java package names differ from `wifi-uav-app-decompiled`, but the control
+stack matches WiFi-UAV:
+
+- `defpackage.vo` is the dispatcher equivalent to WiFi-UAV's `d00`.
+- `vo` maps the same SSID prefixes:
+  - `FLOW_` / `FlOW_` -> `Uav`
+  - `WIFI_`, `GD89Pro_`, `WTECH-`, `WTECH_` -> `Fld`
+- `defpackage.po` is the FLD wrapper and sends through
+  `lxSigPro.getInstance().DataForward(bytes, 0)`.
+- `defpackage.wo` is the UAVSDK wrapper and sends through
+  `UAVSDK.nativeSendCtlMsg(bytes, len)`.
+- `defpackage.gn` is the RC packet builder. It is structurally the same as
+  WiFi-UAV's `defpackage.xx`.
+
+`gn.d()` builds the short 8-byte packet:
+
+```text
+66 <yaw> <pitch> <throttle> <roll> <flags> <xor> 99
+```
+
+`gn.e()` builds the extended 20-byte packet:
+
+```text
+66 14 <yaw> <pitch> <throttle> <roll> <flags0> <flags1>
+00 00 00 00 00 00 00 00 00 00 <xor> 99
+```
+
+`NewControlActivity` chooses between those with:
+
+```text
+(B.Z() && B.I()) ? C.e() : C.d()
+```
+
+That is the same broad condition as the WiFi-UAV app: use the extended packet
+only for the UAV/FLOW-style backend when the version/capability state says the
+extended command path is available.
+
+### 4DRC Air PTZ / Camera Tilt
+
+4DRC Air has the same PTZ-style UI control:
+
+- `lxUavCtrlView` creates `lxPtzSlider` and a `ptz_btn_nor` / `ptz_btn_sel`
+  toggle.
+- `lxUavCtrlView.getPtzUpDnState()` maps slider percent to
+  `0=neutral`, `1=one tilt direction`, `2=opposite tilt direction`.
+- `NewControlActivity` stores that into `gn.v`.
+- `gn.e()` packs `(v & 3) << 6` into extended packet byte `6`.
+
+This is app-level evidence for camera tilt/servo support on 4DRC Air devices
+that actually use the extended UAV/FLOW command path. The short FLD packet
+`gn.d()` has no PTZ field, so tilt should not be expected on FLD/short-packet
+devices unless captures show another command path.
+
 ## App Backend Variants
 
 The app uses `defpackage.d00` as a dispatcher. It maps SSID prefixes onto two
