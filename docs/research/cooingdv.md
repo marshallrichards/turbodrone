@@ -1281,6 +1281,25 @@ decompiled apps does not expose an obvious runtime PTZ command for them. It may
 exist in another white-label app, another firmware telemetry/status packet, or a
 model-specific command not reachable from the visible KY/RC UI.
 
+### M10 hardware probe (GL reserved-byte sweep, negative)
+
+TurboDrone `experimental/cooingdv/gl_tilt_probe.py` was run against an **M10**
+on **GL** (`resolution-id=101`, 21-byte `03 66 14 ... 99` packets):
+
+- Full auto-sweep of Wi-Fi bytes **9–18** with values
+  `00, 01, 02, 04, 08, 10, 20, 40, 80, FF` (2.5 s each, neutral sticks).
+- Sweep of unused `flags1` bits `10, 20, 40, 80` and `flags2` bits
+  `02, 04, 08, 10, 20, 40, 80`.
+- WiFi-UAV-style 2-bit patterns on bytes 9–10 (`40`/`80`/`C0`, `01`/`02`).
+
+**Result:** no mechanical camera tilt observed. Some flag/reserved combos caused
+LEDs to switch between solid and flashing (likely firmware rejecting non-stock
+frames); flight axes were left at center (`0x80`).
+
+This does not prove all CooingDV drones lack a tilt servo, but for **M10 + GL
+Wi-Fi RC on UDP 7099**, tilt is **not** in the obvious reserved region or
+unused GL flag bits tested above.
+
 ## Video Feed
 
 ### Wi-Fi RTSP Path
