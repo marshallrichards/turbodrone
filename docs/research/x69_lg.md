@@ -30,11 +30,13 @@ TurboDrone implementation status:
   - `backend/models/x69_lg_rc.py`
   - `backend/protocols/x69_lg_rc_protocol_adapter.py`
 - Camera tilt/servo direction bits are implemented.
-- Video is implemented experimentally in:
-  - `backend/protocols/x69_lg_video_protocol.py`
-- The video adapter sends the native stream commands, reassembles H.265 frames
-  from UDP `1234`, and pipes them through `ffmpeg` to produce JPEG frames for the
-  existing MJPEG web pipeline.
+- Video (select with `X69_LG_VIDEO_MODE`):
+  - **`rtsp`** (default): `backend/protocols/x69_lg_rtsp_video_protocol.py` — OpenCV
+    RTSP client for `rtsp://172.16.11.1/live/ch00_1` (stock `MainActivityRTSP` URL).
+  - **`h265`**: `backend/protocols/x69_lg_video_protocol.py` — native stream
+    commands, H.265 reassembly on UDP `1234`, FFmpeg transcode to JPEG (`udp` alias).
+  - **`jpeg`**: `backend/protocols/x69_lg_jpeg_video_protocol.py` — legacy UDP JPEG
+    on `7070`/`7080`; not used by shipped `MainActivityUDP` launcher.
 
 ## Existing Implementation Fit
 

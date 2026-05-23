@@ -37,6 +37,9 @@ from protocols.wifi_cam_video_protocol import WifiCamVideoProtocolAdapter
 from models.x69_lg_rc import X69LgRcModel
 from protocols.x69_lg_rc_protocol_adapter import X69LgRcProtocolAdapter
 from protocols.x69_lg_video_protocol import X69LgVideoProtocolAdapter
+from protocols.x69_lg_rtsp_video_protocol import X69LgRtspVideoProtocolAdapter
+from protocols.x69_lg_jpeg_video_protocol import X69LgJpegVideoProtocolAdapter
+from protocols.x69_lg_video_mode import normalize_x69_video_mode
 from plugins.manager import PluginManager
 from utils.dropping_queue import DroppingQueue
 from utils.wifi_uav_variants import (
@@ -359,36 +362,67 @@ async def lifespan(app: FastAPI):
             "debug": os.getenv("WIFI_CAM_VIDEO_DEBUG", "false").lower() in ("1", "true", "yes", "on"),
         }
     elif drone_type == "x69_lg":
-        logger.info("[main] Using X69/LG UDP implementation.")
+        x69_video_mode = normalize_x69_video_mode(os.getenv("X69_LG_VIDEO_MODE"))
         default_ip = "172.16.11.1"
         default_ctrl_port = 23458
-        default_video_port = 1234
-        default_video_control_port = 23459
         default_control_rate = 25.0
 
         drone_ip = os.getenv("DRONE_IP", default_ip)
         ctrl_port = int(os.getenv("CONTROL_PORT", default_ctrl_port))
-        video_port = int(os.getenv("VIDEO_PORT", default_video_port))
         local_port = int(os.getenv("X69_LG_LOCAL_CONTROL_PORT", 0))
-        video_control_port = int(os.getenv("X69_LG_VIDEO_CONTROL_PORT", default_video_control_port))
-        local_video_control_port = int(os.getenv("X69_LG_LOCAL_VIDEO_CONTROL_PORT", 23459))
-        x69_jpeg_quality = int(os.getenv("X69_LG_JPEG_QUALITY", 12))
-        x69_output_width = int(os.getenv("X69_LG_OUTPUT_WIDTH", 640))
-        x69_output_fps = int(os.getenv("X69_LG_OUTPUT_FPS", 15))
+        x69_debug = os.getenv("X69_LG_VIDEO_DEBUG", "false").lower() in ("1", "true", "yes", "on")
 
         model = X69LgRcModel()
         rc_proto = X69LgRcProtocolAdapter(drone_ip, ctrl_port, local_port=local_port)
-        video_adapter_cls = X69LgVideoProtocolAdapter
-        video_adapter_args = {
-            "drone_ip": drone_ip,
-            "control_port": video_control_port,
-            "video_port": video_port,
-            "local_control_port": local_video_control_port,
-            "jpeg_quality": x69_jpeg_quality,
-            "output_width": x69_output_width,
-            "output_fps": x69_output_fps,
-            "debug": os.getenv("X69_LG_VIDEO_DEBUG", "false").lower() in ("1", "true", "yes", "on"),
-        }
+
+        if x69_video_mode == "jpeg":
+            logger.info("[main] Using X69/LG JPEG video (legacy UDP 7070/7080 path).")
+            video_adapter_cls = X69LgJpegVideoProtocolAdapter
+            video_adapter_args = {
+                "drone_ip": drone_ip,
+                "control_port": int(os.getenv("X69_LG_JPEG_CMD_PORT", 7080)),
+                "video_port": int(os.getenv("X69_LG_JPEG_LOCAL_PORT", os.getenv("VIDEO_PORT", 7070))),
+                "local_port": int(os.getenv("X69_LG_JPEG_LOCAL_PORT", 7070)),
+                "cmd_port": int(os.getenv("X69_LG_JPEG_CMD_PORT", 7080)),
+                "decrypt_packets": os.getenv("X69_LG_JPEG_DECRYPT", "true").lower()
+                in ("1", "true", "yes", "on"),
+                "stop_h265_first": os.getenv("X69_LG_JPEG_STOP_H265", "true").lower()
+                in ("1", "true", "yes", "on"),
+                "debug": x69_debug,
+            }
+        elif x69_video_mode == "rtsp":
+            logger.info("[main] Using X69/LG RTSP video.")
+            default_rtsp_port = 554
+            video_port = int(os.getenv("VIDEO_PORT", os.getenv("X69_LG_RTSP_PORT", default_rtsp_port)))
+            video_adapter_cls = X69LgRtspVideoProtocolAdapter
+            video_adapter_args = {
+                "drone_ip": drone_ip,
+                "control_port": int(os.getenv("X69_LG_VIDEO_CONTROL_PORT", 23459)),
+                "video_port": video_port,
+                "rtsp_path": os.getenv("X69_LG_RTSP_PATH", "/live/ch00_1"),
+                "rtsp_url": os.getenv("X69_LG_RTSP_URL", "").strip() or None,
+                "jpeg_quality": int(os.getenv("X69_LG_RTSP_JPEG_QUALITY", "85")),
+                "debug": x69_debug,
+            }
+        else:
+            logger.info("[main] Using X69/LG H.265 video (UDP port 1234).")
+            default_video_port = 1234
+            video_port = int(os.getenv("VIDEO_PORT", default_video_port))
+            local_video_control_port = int(os.getenv("X69_LG_LOCAL_VIDEO_CONTROL_PORT", 23459))
+            x69_jpeg_quality = int(os.getenv("X69_LG_JPEG_QUALITY", 12))
+            x69_output_width = int(os.getenv("X69_LG_OUTPUT_WIDTH", 640))
+            x69_output_fps = int(os.getenv("X69_LG_OUTPUT_FPS", 15))
+            video_adapter_cls = X69LgVideoProtocolAdapter
+            video_adapter_args = {
+                "drone_ip": drone_ip,
+                "control_port": int(os.getenv("X69_LG_VIDEO_CONTROL_PORT", 23459)),
+                "video_port": video_port,
+                "local_control_port": local_video_control_port,
+                "jpeg_quality": x69_jpeg_quality,
+                "output_width": x69_output_width,
+                "output_fps": x69_output_fps,
+                "debug": x69_debug,
+            }
     elif drone_type == "debug":
         logger.info("[main] Using debug drone implementation.")
         default_control_rate = 80.0

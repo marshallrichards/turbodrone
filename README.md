@@ -89,13 +89,15 @@ DRONE_TYPE=s2x
 # DRONE_TYPE=x69_lg
 ```
 
-`x69_lg` video requires the `ffmpeg` executable to be available on `PATH`
-because the drone sends H.265 frames that the backend converts to JPEG for the
-existing MJPEG web stream. Its default video output is tuned for lower latency:
-`X69_LG_OUTPUT_WIDTH=640`, `X69_LG_OUTPUT_FPS=15`, and
-`X69_LG_JPEG_QUALITY=12`. The drone's native stream is 1280x720 H.265. Lower
-JPEG quality numbers are better-looking/larger; larger values are
-fuzzier/smaller.
+`x69_lg` supports three video modes via `X69_LG_VIDEO_MODE`:
+
+- **`rtsp`** (default): OpenCV pulls `rtsp://172.16.11.1/live/ch00_1` (HEVC 1280×720).
+  Set `X69_LG_RTSP_JPEG_QUALITY` (1–100, higher is better).
+- **`h265`**: H.265 on UDP port `1234`, reassembled and transcoded with **`ffmpeg`** on
+  `PATH`. Tune `X69_LG_OUTPUT_WIDTH`, `X69_LG_OUTPUT_FPS`, and `X69_LG_JPEG_QUALITY`
+  (FFmpeg `q:v`: lower = sharper). Alias: `udp`.
+- **`jpeg`** (experimental): Legacy UDP JPEG on ports `7070`/`7080`; often unavailable
+  on current firmware. Probe: `python turbodrone/experimental/x69/jpeg_probe.py`
 
 Launch the backend: 
 ```
