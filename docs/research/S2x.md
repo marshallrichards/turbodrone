@@ -17,6 +17,8 @@ apps so far:
   `decompiled-pl-fpv-1.1.5`.
 - REDRIE FLY: `com.vison.macrochip.inporsa.fly`, version `1.0.5`,
   decompiled at `decompiled-redrie-fly-1.0.5`.
+- Ruko Drone: `com.vison.macrochip.ruko.drone`, version `1.7.6`,
+  decompiled at `decompiled-ruko-drone-1.7.6`.
 
 PL FPV is compatible with TurboDrone's existing `s2x` implementation. A
 Plegble PL-1515 that lists PL FPV in its guidebook was flown successfully with
@@ -154,6 +156,207 @@ and startup flow, but that activity source is missing from
 `decompiled-redrie-fly-1.0.5/sources`; the exact runtime switch between
 `ControlConsumer` and `HyControlConsumer` is therefore not visible in this pass.
 
+### Ruko Drone 1.7.6 notes
+
+Ruko Drone is another `com.vison.macrochip` OEM app (publisher 纬盛 / Vison,
+世季 SJ base library). It shares the Macrochip network stack and ST gimbal
+protocol with PL FPV / REDRIE FLY, but its **default RC path is not the
+20-byte `66 14 ... 99` packet** that TurboDrone's `s2x` backend sends.
+
+App identity:
+
+- Package: `com.vison.macrochip.ruko.drone`
+- Version: `1.7.6` / `versionCode=76`
+- Application: `com.vison.macrochip.app.MyApplication` → `SJBaseApplication`
+- Launcher: `com.vison.macrochip.activity.WelcomeActivity`
+- Flight UI: `ControlHyActivity` when `protocol == HACK_FLY` (default),
+  else `ControlActivity`
+- Decompile: `decompiled-ruko-drone-1.7.6/`
+
+#### Family comparison
+
+| Family | Match? | Notes |
+|--------|--------|-------|
+| **S2x / Macrochip** | **Yes** | Same `BaseApplication` ports, `vison_main` JNI, `08` video heartbeat, `FF 53 54` ST gimbal |
+| **fld_pro / HACK_FLY** | **Partial** | Default RC is 17-byte `68 01 0D` via `LGDataUtils`, same shape as FLD Pro `hm.d()` |
+| **cooingdv** | **No** | No UDP `7099`, no `03 66 ... 99` packets |
+| **wifi_uav** | **Partial** | Command port `8080` overlaps; framing and video ports differ |
+| **rxdrone / hk88** | **No** | Different stacks |
+
+#### Network and video
+
+Same Macrochip network constants as other S2x apps:
+
+- Target: phone Wi-Fi DHCP gateway → `BaseApplication.hostIp` (typically
+  `172.16.10.1`)
+- RC/command UDP: `8080` (or `8088` for FF3519/Hisi-style frames)
+- Command UDP receive: `8081` (`MsgUdpReceiveConnection`)
+- Video stream: TCP or UDP port `8888` (`STREAM_PORT` / `DEV_TCP_PORT`)
+- Video start/keepalive (UDP `8080`): `08 <local-ipv4×4>` every 1000 ms
+  (`StreamUdpConnection`)
+- Msg keepalive (UDP `8080`): `09 <local-ipv4×4>` every 1000 ms
+  (`MsgUdpConnection`)
+
+Transport modes are selected per device in `DeviceInfoManager` / `PlayInfo`:
+
+| Mode | Path | Decode |
+|------|------|--------|
+| **UDP** (common S2x path) | `StreamUdpConnection` on `8888` + `08` heartbeat | `VNDK` + H264/H265/JPEG parsers (`VideoStreamHandle`) |
+| **TCP** | `StreamTcpConnection` on `8888` | Same native decode stack |
+| **RTSP** | `rtsp://172.16.10.1:554/livestream/12` (`RTSPClient`) | RTSP pull + app decoders |
+| **USB** | `MsgUsbConnection` | Same handlers |
+
+Native libraries (from Java `System.loadLibrary`, `.so` not in decompile tree):
+
+- `vison_main` — video decode (`com.vison.sdk.VNDK`)
+- `LGDataUtils` — HACK_FLY control encode/decode (`com.vison.macrochip.sdk.LGDataUtils`)
+- `rtmp_live`, `detector-lib` — live stream / vision helpers
+
+The UDP JPEG chunk format (`0x40 0x40` header, `##` trailer) documented under
+"Native S2x UDP video parser" still applies when `PlayInfo.is872()` is true.
+
+#### Protocol auto-detection
+
+`SJBaseApplication` switches `protocol` based on inbound frames:
+
+| Magic | Protocol | Detection site |
+|-------|----------|----------------|
+| `5A 5F` | `SJ` (世季) | `onTcpReceiveData` |
+| `68` (`0x58` wire) | `HACK_FLY` (黑飞) | `onTcpReceiveData` |
+| `FF 53 54` | ST / PTZ side channel | `onUdpReceiveData` / TCP |
+| (implicit) | `FEI_SHA` (飞沙) | Used when not HACK_FLY |
+
+Startup default: `ProtocolEnum.HACK_FLY` (`SJBaseApplication.java` L69).
+`WelcomeActivity` routes to `ControlHyActivity` for HACK_FLY, `ControlActivity`
+otherwise.
+
+#### RC control — three parallel packet families
+
+**A) HACK_FLY (default) — 17-byte native HY packet**
+
+`SendHyControlThread` (`com.sj.baselibrary.thread.SendHyControlThread`) sends
+every **100 ms** (control + 12-byte extend packet):
+
+```text
+68 01 0D <13-byte LGDataUtils.convertHyControl payload> <xor>
+```
+
+- Byte `0`: `0x68`
+- Byte `1`: `0x01`
+- Byte `2`: `0x0D` (13)
+- Bytes `3..15`: native-encoded `LGControlHyBean` fields
+- Byte `16`: XOR of bytes `1..15`
+
+Extend packet (sport mode, sky/far/spiral fly, emergency RTH):
+
+```text
+68 0B 08 <8-byte convertExtend payload> <xor>
+```
+
+`LGControlHyBean` fields exposed to Java (`LGControlHyBean.java`): `rocker1..4`
+(default **128** center), trims, `autoTakeoff`, `autoLand`, `goHome`, `stop`,
+`lockUnlock`, `followMe`, `circleFly`, `PTZ_H`, `PTZ_V`, `VisionFollow`, etc.
+
+In this decompile, outbound sticks are **mostly neutral** (`rocker1..3 = 128`);
+only `rocker4 = rotate*2` and go-home point overrides change. Mode buttons drive
+`BaseControlThread` flags. Physical RC stick positions appear to come back via
+telemetry (`sjHyInfo9BBean`) for UI display only.
+
+**Important:** No `66 14 ... 99` builder exists anywhere in the Ruko Java sources.
+This is the same 17-byte `68 01 0D` family documented in `fld_pro.md`, not the
+20-byte packet TurboDrone's `s2x` adapter currently sends. Treat Ruko hardware as
+**unverified** on `DRONE_TYPE=s2x` until a capture confirms which packet shape
+the board accepts.
+
+**B) FEI_SHA (飞沙) — 12/14-byte control packet**
+
+`SendControlThread` sends every **80 ms** when `protocol != HACK_FLY`:
+
+```text
+5A 55 08 02 <flags> 7F 7F 80 <rotate*2> 20 20 <xor>
+```
+
+| Offset | Value | Meaning |
+|--------|-------|---------|
+| 0–1 | `5A 55` | FEI_SHA magic |
+| 2 | `08` | payload length |
+| 3 | `02` | control subcommand |
+| 4 | flags | bit0 takeoff, bit1 land, bit2 goHome, bit7 stop |
+| 5–7 | `7F 7F 80` | stick channels (fixed neutral in app) |
+| 8 | `rotate*2` | yaw from follow/home logic |
+| 9–10 | `20 20` | trim placeholders |
+| 11 | XOR | bytes 2–10 |
+
+Lock/surround variant adds bytes 11–12 and XOR at byte 13 (14-byte packet).
+
+**C) ST / PTZ side channel — `FF 53 54` prefix**
+
+Sent on UDP `8080` (most commands) or TCP `8888` via `writeTCPCmd` for tilt set
+on non-Hisi boards. Prefix: `FF 53 54` ("ST") + command byte `[3]` + payload.
+
+#### Camera tilt / PTZ (confirmed in Ruko)
+
+Unlike REDRIE FLY's decompile-only ambiguity, Ruko has explicit PTZ UI and
+command builders.
+
+**UI path** (`ControlActivity` / `ControlHyActivity`):
+
+- `ptz_up_btn` / `ptz_down_btn` adjust `ptz_seek_bar` by ±5
+- Each press calls `MyApplication.setPTZData(progress)`
+- Telemetry syncs seek bar from `NOTIFY_TYPE_PTZ_ANGLE` / `flyInfo.getZTP()`
+
+**Tilt set commands** (`SJBaseApplication.setPTZData(int angle)`):
+
+| Board path | Packet | Angle byte |
+|------------|--------|------------|
+| Hisi | `FF 53 54 32 01 <angle>` | byte `[5]` |
+| HACK_FLY | `68 07 01 <angle> <xor>` | byte `[3]` |
+| FEI_SHA | `5A 55 02 14 <angle> <xor>` | byte `[4]` |
+
+Non-Hisi tilt uses `writeTCPCmd` → TCP port **8888**.
+
+**Other PTZ commands** (UDP `8080` unless noted):
+
+| Cmd `[3]` | Payload | Function |
+|-----------|---------|----------|
+| 2 | `[4]=1/2` | PTZ off/on |
+| 7 | `[4]=1` | PTZ ready status |
+| 15 | `[4]=0` | start distance calibration |
+| 16 | `[4]=roll, [5]=pitch` | PTZ trim (defaults 128) |
+| 18 | `0` | reset PTZ |
+| 21 | `[4]=1` | get PTZ angle |
+| 32 | `[4]=1, [5]=angle` | set PTZ angle (Hisi `setPTZData`) |
+| 38 | yaw byte | yaw trim |
+
+**Responses** (`AnalysisUtils.ptz`):
+
+- cmd `97` → `NOTIFY_TYPE_PTZ_ANGLE` bytes `[4],[5]`
+- cmd `21` → `NOTIFY_TYPE_UPDATE_PTZ_ANGLE` byte `[5]`
+
+`SendHyControlThread.setPtzV()` exists but has **no callers** in this decompile;
+stock tilt goes through `setPTZData` / ST commands, not the HY `PTZ_V` field.
+
+For TurboDrone tilt experiments on Ruko hardware, prefer `s2x_tilt_probe.py`
+**`st3` mode** (`ff 53 54 33 <param> <value>`) and direct ST cmd `32` shape
+above, not HY bytes 8–17 (those are zero-filled in the 20-byte `66 14` path
+this app does not even build).
+
+#### Key source files (Ruko)
+
+| Topic | Path under `decompiled-ruko-drone-1.7.6/sources/` |
+|-------|---------------------------------------------------|
+| Manifest | `resources/com.vison.macrochip.ruko.drone.apk/AndroidManifest.xml` |
+| Ports / egress | `com/vison/baselibrary/base/BaseApplication.java` |
+| HACK_FLY RC | `com/sj/baselibrary/thread/SendHyControlThread.java` |
+| FEI_SHA RC | `com/sj/baselibrary/thread/SendControlThread.java` |
+| Protocol routing | `com/sj/baselibrary/base/SJBaseApplication.java` |
+| PTZ commands | `com/sj/baselibrary/base/SJBaseApplication.java` (`setPTZData`, etc.) |
+| PTZ parse | `com/sj/baselibrary/utils/AnalysisUtils.java` (`ptz`) |
+| Video decode | `com/vison/baselibrary/connect/stream/VideoStreamHandle.java` |
+| Video heartbeat | `com/vison/baselibrary/connect/wifi/StreamUdpConnection.java` |
+| Tilt UI | `com/vison/macrochip/activity/ControlActivity.java` L689–706 |
+| Native HY encode | `com/vison/macrochip/sdk/LGDataUtils.java` |
+
 Additional app-level features spotted in REDRIE FLY that do not change the
 S2x wire implementation:
 
@@ -176,30 +379,24 @@ this unpack. Because Java still loads `vison_main`, PL FPV's native
 `libvison_main.so` analysis remains the best current native evidence for the
 S2x video parser.
 
-Camera tilt / servo note:
+Camera tilt / PTZ note:
 
-No confirmed camera-tilt/PTZ/servo command was recovered from the REDRIE FLY
-Java sources in this pass. The visible RC builders only encode flight sticks,
-flight one-shots, headless/calibration/record/rocker flags, and optional roll.
-The HY packet bytes `8..17` are zero-filled, and the short packet has no spare
-field that is obviously camera tilt.
+Ruko Drone 1.7.6 (see "Ruko Drone 1.7.6 notes" above) **confirms** camera tilt
+via dedicated PTZ UI (`ptz_up_btn` / `ptz_down_btn` / `ptz_seek_bar`) and
+`setPTZData(angle)` commands on three paths: ST `FF 53 54 32`, HACK_FLY
+`68 07 01`, and FEI_SHA `5A 55 02 14`. Stock tilt does **not** ride in the
+recurring HY/FEI_SHA stick packets.
 
-There are still two unresolved clues:
+For PL FPV / REDRIE FLY / other Macrochip apps without visible tilt UI, the same
+ST side channel is still the best hypothesis:
 
-- `layout_control_top.xml` includes extra buttons named `btn_go`, `btn_reverse`,
-  `btn_support`, `btn_follow`, and `btn_switch_lens`.
-- `MyApplication.sendFlowParam(int, int)` sends `ff 53 54 33 <param> <value>` to
-  UDP `8080`, and `WifiCommandHelper.getCameraIndex()` sends
-  `ff 53 54 33 16`.
+- `ff 53 54 <cmd> ...` on UDP `8080` (cmd `32` for angle set on Hisi boards)
+- `ff 53 54 33 <param> <value>` flow-param commands (`sendFlowParam`,
+  `WifiCommandHelper.getCameraIndex`)
 
-Those could be camera-board, optical-flow, follow/support, lens-switch, or other
-feature commands, but the referenced `ControlActivity` source is missing from
-the decompile, so the button handlers and any servo mapping are not visible. If
-REDRIE/S2x hardware has a camera tilt servo, the next best evidence would be a
-packet capture while pressing the app's camera up/down controls. Watch
-especially for UDP `8080` packets beginning with `ff 53 54 33`, or for a
-previously unused byte in the recurring `66 14 ... 99` HY packet changing while
-tilt is commanded.
+REDRIE FLY's `66 14` HY bytes `8..17` remain zero-filled in Java; do not assume
+tilt lives there without a capture. Use `s2x_tilt_probe.py` **`st3` mode** or
+replay Ruko's `setPTZData` packet shapes when probing tilt on Macrochip hardware.
 
 ## RC timing and feel
 

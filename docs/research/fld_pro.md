@@ -107,6 +107,12 @@ to the 17-byte `68 01 0d ...` HY-family packet documented in the Netopsun/HK88
 research, but this app has its own builder and should be verified with captures
 before reusing another backend's exact semantics.
 
+The Ruko Drone app (`com.vison.macrochip.ruko.drone` 1.7.6,
+`decompiled-ruko-drone-1.7.6`) uses the same `68 01 0D` + `LGDataUtils`
+encode path as its default HACK_FLY control (`SendHyControlThread`). See
+`docs/research/S2x.md` ("Ruko Drone 1.7.6 notes") for video, ST gimbal, and
+tilt command details on that Macrochip stack.
+
 ## New / GPS Control Packet
 
 `sz.w()` builds a shorter framed packet for `op0.e.New`:

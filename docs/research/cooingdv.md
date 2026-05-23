@@ -139,6 +139,8 @@ Likely future TurboDrone split:
   KY FPV `StreamClient`, both centered on `192.168.169.1:8800`.
 - `cooingdv_jieli`: KY FPV Jieli/CTP backend using `192.168.8.15:2228`,
   `DeviceClient`, `FLYING_CTRL`, and `CTP:` JSON packets.
+- `rxdrone`: RxDrone / HF UFO Jieli video plus `Protocol1` RC (`0139` hex tunnel,
+  GPS UDP `3456`, `FLIGHT_CONTROL` / `DRONE_DATA`). See `docs/research/rxdrone.md`.
 - `cooingdv_drive` or `cooingdv_4drc_drive`: optional future non-drone backend
   for the 4DRC excavator/ground-vehicle path. This should stay separate from
   flight because its packet shape and controls are not quadcopter RC controls.
@@ -152,6 +154,24 @@ Implementation status in TurboDrone:
 - `cooingdv_bl` remains research-only until runtime captures confirm the safe
   ACK/session behavior needed for motor control.
 - `cooingdv_drive` is not implemented and is out of scope for flight support.
+
+### RxDrone (`rxdrone`) — HF UFO 1.5.2
+
+The decompiled HF UFO app (`decompiled-hfufo-1.5.2`, package
+`com.xaufohf.rxdrone`) shares the same Jieli video stack (RTP `6666`, SDP `6789`,
+`AVPlayer` on UDP `2224`, `DeviceClient` CTP) documented above, but its **main RC
+paths differ** from KY FPV's `FLYING_CTRL` decimal backend:
+
+- `ManualCtrlActivity` (gateway `192.168.8.1`) tunnels hex-encoded `Protocol1`
+  (13-byte `66 … 99 … A5`) or 20-byte Quanzhi packets through `CommandHub` topic
+  `0139` (`CMD_NO_HEAD_MODE`), not `FLYING_CTRL` `BYTE0..BYTE7`.
+- `HDManualCtrlActivity` (`192.168.80.x`) sends the same raw packets on
+  `UDPClientGPS` to `192.168.80.1:3456`, and can also wrap them in CTP topic
+  `FLIGHT_CONTROL` / `DRONE_DATA` via `DeviceClient` on TCP `3333`.
+
+Planned TurboDrone backend name: **`rxdrone`**. Full mapping (video, RC, PTZ):
+`docs/research/rxdrone.md`. Reuse Jieli **video** from `cooingdv_jieli`; implement
+RC as a separate **`rxdrone`** adapter after capture on the target IP family.
 
 ## Network Constants
 
