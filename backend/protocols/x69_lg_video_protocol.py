@@ -521,7 +521,7 @@ class X69LgVideoProtocolAdapter(BaseVideoProtocolAdapter):
             return
         now = time.monotonic()
         if self._dump_h265_start is None:
-            dump_dir = Path(os.getenv("X69_LG_DUMP_DIR", "dumps_x69"))
+            dump_dir = Path(os.getenv("X69_LG_DUMP_DIR", "backend/dumps_x69"))
             dump_dir.mkdir(parents=True, exist_ok=True)
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self._dump_h265_path = dump_dir / f"x69_capture_{stamp}.h265"

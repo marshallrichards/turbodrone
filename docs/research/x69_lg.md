@@ -135,7 +135,7 @@ mediacodecInit(2, 1280, 720, null, null, null)
 So this app's active UDP video path is H.265-oriented, not S2x JPEG chunking.
 TurboDrone's `x69_lg` adapter reassembles these H.265 frames and runs them
 through `ffmpeg` as an HEVC bytestream. Offline testing of
-`dumps_x69/x69_capture_20260519_231654.h265` decoded successfully. The live
+A local `.h265` capture under `backend/dumps_x69/` (gitignored) decoded successfully. The live
 pipeline needs normal buffering (`-fflags +genpts`) rather than the earlier
 low-latency/nobuffer settings; the latter produced only the first JPEG and then
 FFmpeg missed reference frames.

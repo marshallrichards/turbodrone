@@ -166,3 +166,10 @@ public/
 
 # assets
 backend/plugins/follow/assets/*
+
+# Drone video / frame captures (private; never commit)
+backend/dumps_x69/
+backend/dumps_*/
+dumps_x69/
+dumps_*/
+**/offline_frames/
