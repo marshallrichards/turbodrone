@@ -12,6 +12,7 @@ Keeps `66 14 ... 99` @ ~20 Hz on UDP 8080 (same as TurboDrone) plus optional
 Examples:
   python s2x_ptz_helper.py --video-keepalive
   python s2x_ptz_helper.py --once st-set --angle 128
+  python s2x_ptz_helper.py --once st3 --st3-param 18 --st3-value 40 --video-keepalive
   python s2x_ptz_helper.py --once all-set --angle 64 --try-tcp
   python s2x_ptz_helper.py --preset-sweep --video-keepalive -v
 """
@@ -377,7 +378,17 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--once",
-        choices=("st-set", "st-get", "st-on", "st-off", "st-reset", "hackfly-set", "feisha-set", "all-set"),
+        choices=(
+            "st-set",
+            "st-get",
+            "st-on",
+            "st-off",
+            "st-reset",
+            "st3",
+            "hackfly-set",
+            "feisha-set",
+            "all-set",
+        ),
         help="Send one command (or all-set trio) then exit",
     )
     p.add_argument(
@@ -430,6 +441,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 session.send_udp(st_ptz_off(), "st-off")
             elif args.once == "st-reset":
                 session.send_udp(st_reset(), "st-reset")
+            elif args.once == "st3":
+                session.send_st3()
             elif args.once == "hackfly-set":
                 session.send_tcp(hackfly_set_angle(session.angle), "hackfly-set")
             elif args.once == "feisha-set":

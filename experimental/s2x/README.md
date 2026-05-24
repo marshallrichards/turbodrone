@@ -1,6 +1,6 @@
 # S2x camera tilt / servo probe
 
-Macrochip apps (PL FPV, HiTurbo, REDRIE FLY) send **20-byte HY** packets
+Macrochip apps (PL FPV, HiTurbo, REDRIE FLY, LOILEY FLY) send **20-byte HY** packets
 `66 14 RR PP TT YY F1 F2 [8..17] CHK 99` on UDP **8080**. The decompiled
 `HyControlConsumer` **always zeroes bytes 8–17** — likely because those apps have
 no tilt UI, **not** because the flight board ignores them.
@@ -32,6 +32,33 @@ python s2x_tilt_probe.py --drone-ip 172.16.10.1 --video-keepalive
 
 Use your actual gateway if different (`ipconfig` while on drone Wi‑Fi).
 
+## Quick start: auto ST3 sweep (recommended)
+
+Best first test for hidden **tilt / lens / gimbal** on Macrochip drones when the
+stock app has no tilt slider. Sends `ff 53 54 33 <param> <value>` on UDP **8080**
+while a neutral **HY** stream keeps the link alive (~20 Hz). Includes values
+**25** and **40** used by LOILEY FLY for dual-lens (`param=18`).
+
+```powershell
+cd turbodrone\experimental\s2x
+python s2x_tilt_probe.py --mode st3 --auto-sweep --video-keepalive --log-file st3_sweep.log -v
+```
+
+- **~12–15 min** with defaults (params `0..48`, values `0,1,2,25,40,255`, 2.5 s per combo).
+- Watch the camera (UDP **8888** or stock app preview). Note any line where the
+  lens moves, tilts, or switches — especially `ST3 param=18 value=25` or `value=40`.
+- Stop TurboDrone first so nothing else uses UDP 8080.
+
+**LOILEY FLY / dual-lens only** (fast spot-check before the full sweep):
+
+```powershell
+python s2x_ptz_helper.py --once st3 --st3-param 18 --st3-value 40 --video-keepalive
+python s2x_ptz_helper.py --once st3 --st3-param 18 --st3-value 25 --video-keepalive
+```
+
+If ST3 finds nothing but you suspect **servo tilt** (not lens switch), try the
+Ruko-style angle command next: `python s2x_ptz_helper.py --once st-set --angle 140 --video-keepalive`.
+
 ## Modes
 
 ### `hy` — main hypothesis (reserved bytes 8–17)
@@ -50,13 +77,17 @@ python s2x_tilt_probe.py --mode hy --auto-sweep --log-file hy_sweep.log -v
 ### `st3` — side-channel hypothesis
 
 Sends `ff 53 54 33 <param> <value>` while keeping a neutral HY stream alive.
-Default: params `0..48`, values `0,1,2,255`.
+Default: params `0..48`, values `0,1,2,25,40,255` (25/40 from LOILEY FLY lens UI).
+
+Same as [Quick start: auto ST3 sweep](#quick-start-auto-st3-sweep-recommended) above.
+Shorter value list if you are in a hurry:
 
 ```powershell
-python s2x_tilt_probe.py --mode st3 --auto-sweep --video-keepalive --log-file st3_sweep.log
+python s2x_tilt_probe.py --mode st3 --auto-sweep --video-keepalive --st3-values 0,1,2,255 --log-file st3_sweep.log -v
 ```
 
-If tilt appears, note **param** and **value** (e.g. `param=23 value=1` = up).
+If tilt or lens motion appears, note **param** and **value** (e.g. `param=18 value=40`).
+Known labels in the log: `param=18 (lens_switch)`, `param=16/22 (camera_index_query)`.
 
 ### `all` — full pass
 
@@ -118,6 +149,7 @@ One-shot:
 
 ```powershell
 python s2x_ptz_helper.py --once st-set --angle 140 --video-keepalive
+python s2x_ptz_helper.py --once st3 --st3-param 18 --st3-value 40 --video-keepalive
 python s2x_ptz_helper.py --preset-sweep --video-keepalive --log-file ptz_sweep.log
 ```
 

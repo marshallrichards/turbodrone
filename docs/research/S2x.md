@@ -1,4 +1,4 @@
-# Research for the S2x drones (S20, S29, PL FPV, REDRIE FLY)
+# Research for the S2x drones (S20, S29, PL FPV, REDRIE FLY, LOILEY FLY)
 
 ## Chipset
 
@@ -17,6 +17,8 @@ apps so far:
   `decompiled-pl-fpv-1.1.5`.
 - REDRIE FLY: `com.vison.macrochip.inporsa.fly`, version `1.0.5`,
   decompiled at `decompiled-redrie-fly-1.0.5`.
+- LOILEY FLY: `com.vison.macrochip.loiley.fly`, version `1.0.3`,
+  decompiled at `decompiled-loiley-fly-1.0.3`.
 - Ruko Drone: `com.vison.macrochip.ruko.drone`, version `1.7.6`,
   decompiled at `decompiled-ruko-drone-1.7.6`.
 
@@ -155,6 +157,153 @@ starting with `0x66` over either TCP or UDP and then parses it through
 and startup flow, but that activity source is missing from
 `decompiled-redrie-fly-1.0.5/sources`; the exact runtime switch between
 `ControlConsumer` and `HyControlConsumer` is therefore not visible in this pass.
+
+### LOILEY FLY notes
+
+LOILEY FLY is another OEM skin on the same Macrochip/S2x stack as REDRIE FLY and
+PL FPV. Treat it as **`DRONE_TYPE=s2x`**, not a new TurboDrone backend.
+
+App identity:
+
+- Package: `com.vison.macrochip.loiley.fly`
+- Version: `1.0.3` / `versionCode=3`
+- App label: `Loiley Fly`
+- Application: `com.vison.macrochip.w.fpv.app.MyApplication`
+- Flight UI: `com.vison.macrochip.w.fpv.activity.ControlActivity` (present in
+  this decompile, unlike REDRIE FLY 1.0.5)
+- Decompile: `decompiled-loiley-fly-1.0.3/`
+
+#### Family comparison
+
+| Family | Match? | Notes |
+|--------|--------|-------|
+| **S2x / Macrochip** | **Yes** | Same `BaseApplication` ports, DHCP gateway target, `08` video heartbeat, 20-byte HY RC on UDP `8080` |
+| **REDRIE FLY** | **Yes** | Same `w.fpv` package tree, `MyApplication.isHy`, `HyControlConsumer` / `ControlConsumer` sources, ST3 `sendFlowParam` |
+| **PL FPV** | **Partial** | Same RC/network constants; video decode uses **FHSDK** here instead of `vison_main` / `VNDK` |
+| **Ruko Drone** | **Partial** | Shares ST gimbal `FF 53 54` family; default RC is still 20-byte HY (not Ruko's HACK_FLY `68 01 0D` path) |
+| **fld_pro / wifi_uav / cooingdv / rxdrone** | **No** | Different app publishers and transport stacks |
+
+#### Network and RC
+
+Same Macrochip network constants as other `w.fpv` OEM apps:
+
+- Target: phone Wi-Fi DHCP gateway → `PlayInfo.targetIpAddr` /
+  `BaseApplication.mDevAddr` (typically `172.16.10.1`)
+- RC/command UDP: `8080` via `BaseApplication.writeUDPCmd(...)`
+- Command UDP receive: `8081` (`DEV_UDP_PORT2`)
+- Video stream port constant: `8888` (`DEV_TCP_PORT2`); TCP `8888` or UDP
+  depending on `PlayInfo` device profile
+- Video start/keepalive (UDP `8080`): `08 <local-ipv4×4>` every 1000 ms
+  (`UdpRequestVideo`)
+
+**Runtime RC path:** `ControlActivity.SendHuiYuanThread` builds and sends the
+20-byte HY packet every **80 ms** (~12.5 Hz):
+
+```text
+66 14 RR PP TT YY F1 F2 00 00 00 00 00 00 00 00 00 00 XX 99
+```
+
+Source:
+`decompiled-loiley-fly-1.0.3/sources/com/vison/macrochip/w/fpv/activity/ControlActivity.java`
+(inner class `SendHuiYuanThread`).
+
+HY flag mapping in the live thread (matches TurboDrone `s2x` adapter):
+
+- Byte `6`, bit `0`: one-key fly (`toFlyValue`). Voice commands for fly/land
+  also pulse this bit; land reuses fly, not a separate land bit.
+- Byte `6`, bit `1`: emergency stop (`stopValue`)
+- Byte `6`, bit `2`: calibration (`calibrationValue`)
+- Byte `6`, bit `3`: roll/flip (`rollValue`) — present in `SendHuiYuanThread`
+  but **not** in the co-located `HyControlConsumer.java` for this app
+- Byte `7`, bit `0`: headless
+- Byte `7`, bit `1`: always set (`| 2`)
+- Byte `7`, bit `2`: record state
+- Byte `7`, bit `3`: rocker/control mode
+
+`HyControlConsumer` and `ControlConsumer` still exist under
+`com.vison.macrochip.w.fpv.rx.consumer`, but **no references** to them appear
+in this 1.0.3 decompile. They look like leftover RxJava builders from an older
+control loop; the wired path is `SendHuiYuanThread` only.
+
+The legacy 8-byte builder in `ControlConsumer.java` is the same REDRIE shape:
+
+```text
+66 RR PP TT YY FF XX 99
+```
+
+`MyApplication` sets `isHy = true` when a **10-byte** frame starting with
+`0x66` arrives over TCP or UDP (`DataParse`), same as REDRIE FLY.
+
+#### Video stack difference (FHSDK vs VNDK)
+
+Unlike PL FPV / REDRIE FLY 1.0.5, this build decodes video through **FHSDK**
+(`com.fh.lib.FHSDK`, native libs `FHDEV_Net`, `FHComponent`, `main`) in
+`BaseFilterActivity`, not `com.vison.sdk.VNDK` / `vison_main`.
+
+- `ControlActivity` extends `BaseFilterActivity` and uses OpenGL +
+  `FHSDK.startPlay()` for the main preview path.
+- When `PlayInfo.udpDevType == 7`, the app switches to **IJKPlayer** RTSP
+  (`PlayInfo.RTSPUrl`) instead of the FHSDK GL path.
+- TurboDrone's `s2x` video path (UDP `8888` + JPEG/H264 reassembly) is still
+  the right RC companion; if a Loiley-branded drone only exposes RTSP, video may
+  need a separate mode knob — RC on UDP `8080` should remain the same HY stream.
+
+JNI present but secondary to flight video: `detector-lib` (gesture/object
+detection via `JNIManage`), `pocketsphinx_jni` (voice control).
+
+#### ST3 gimbal / lens switch
+
+`MyApplication.sendFlowParam(cmd, param)` emits UDP:
+
+```text
+FF 53 54 33 <cmd> <param>
+```
+
+(`ST3` variant of the Macrochip `FF 53 54` gimbal family documented for S2x.)
+
+Observed UI wiring in `ControlActivity`:
+
+- On create: `sendFlowParam(18, 40)`
+- Lens switch button: `sendFlowParam(18, 25)` when toggling dual-lens mode
+
+This is the same ST-command family used in `experimental/s2x/s2x_ptz_helper.py`
+for tilt probes on other Macrochip hardware. Auto ST3 sweep (includes values 25
+and 40 for this param): see `experimental/s2x/README.md` — Quick start ST3 sweep.
+
+#### Extra OEM features (not separate protocols)
+
+Loiley-specific UI on top of the shared stack:
+
+- Gesture mode (`GesOnSubscribe` / `btn_gestures`) feeding YUV into detection
+- Voice commands (`VoiceUtils`, PocketSphinx)
+- In-app music playback (`MusicUtils`)
+- VR mode, photo filters, gravity-control mode
+- Dual-lens switch (`btn_switch_lens`)
+
+None of these change the underlying HY RC framing; they add parallel command
+bytes or UI-side stick injection.
+
+#### TurboDrone mapping
+
+| Concern | LOILEY FLY | TurboDrone `s2x` |
+|---------|-------------|------------------|
+| RC packet | 20-byte HY on UDP `8080` | Same |
+| Video heartbeat | `08 <phone-ipv4>` on UDP `8080` | Same (2 s interval in TurboDrone vs 1 s in app) |
+| Video decode | FHSDK / optional RTSP | UDP `8888` native path |
+| Gimbal/lens | `FF 53 54 33` via `sendFlowParam` | Use `s2x_ptz_helper.py` ST probes if needed |
+
+#### Key source paths
+
+| Topic | Path under `decompiled-loiley-fly-1.0.3/` |
+|-------|-------------------------------------------|
+| Manifest | `resources/com.vison.macrochip.loiley.fly.apk/AndroidManifest.xml` |
+| Ports / `writeUDPCmd` | `sources/com/vison/baselibrary/base/BaseApplication.java` |
+| Video heartbeat | `sources/com/vison/baselibrary/thread/UdpRequestVideo.java` |
+| Live HY RC thread | `sources/com/vison/macrochip/w/fpv/activity/ControlActivity.java` (`SendHuiYuanThread`) |
+| Alternate HY builder (unused) | `sources/com/vison/macrochip/w/fpv/rx/consumer/HyControlConsumer.java` |
+| Legacy 8-byte builder (unused) | `sources/com/vison/macrochip/w/fpv/rx/consumer/ControlConsumer.java` |
+| FHSDK video | `sources/com/vison/baselibrary/base/BaseFilterActivity.java` |
+| ST3 commands | `sources/com/vison/macrochip/w/fpv/app/MyApplication.java` |
 
 ### Ruko Drone 1.7.6 notes
 

@@ -78,6 +78,7 @@ FLAGS7_EXTRA_BITS: tuple[int, ...] = (0x04, 0x10, 0x20, 0x40, 0x80)
 ST3_KNOWN_PARAMS: dict[int, str] = {
     0: "sd_info",
     16: "camera_index_query",
+    18: "lens_switch",  # LOILEY FLY: sendFlowParam(18, 40) on start, (18, 25) lens toggle
     22: "camera_index_query_alt",
 }
 
@@ -535,8 +536,8 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--st3-values",
-        default="0,1,2,255",
-        help="Comma-separated ST3 value bytes to try per param",
+        default="0,1,2,25,40,255",
+        help="Comma-separated ST3 value bytes to try per param (25/40 = LOILEY FLY lens)",
     )
     p.add_argument(
         "--hy-from",
