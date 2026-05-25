@@ -108,10 +108,12 @@ research, but this app has its own builder and should be verified with captures
 before reusing another backend's exact semantics.
 
 The Ruko Drone app (`com.vison.macrochip.ruko.drone` 1.7.6,
-`decompiled-ruko-drone-1.7.6`) uses the same `68 01 0D` + `LGDataUtils`
-encode path as its default HACK_FLY control (`SendHyControlThread`). See
-`docs/research/S2x.md` ("Ruko Drone 1.7.6 notes") for video, ST gimbal, and
-tilt command details on that Macrochip stack.
+`decompiled-ruko-drone-1.7.6`) and **Ruko GIM** (`com.vison.macrochip.sj.ruko.gim`
+1.0.5, `decompiled-ruko-gim-1.0.5`, F11GIM3) use the same `68 01 0D` +
+`LGDataUtils` encode path as their default HACK_FLY control
+(`SendHyControlThread`). See `docs/research/S2x.md` ("Ruko Drone 1.7.6 notes"
+and "Ruko GIM 1.0.5 notes") for video, ST gimbal, and tilt command details on
+that Macrochip stack.
 
 ## New / GPS Control Packet
 

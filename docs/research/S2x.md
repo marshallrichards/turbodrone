@@ -21,6 +21,8 @@ apps so far:
   decompiled at `decompiled-loiley-fly-1.0.3`.
 - Ruko Drone: `com.vison.macrochip.ruko.drone`, version `1.7.6`,
   decompiled at `decompiled-ruko-drone-1.7.6`.
+- Ruko GIM: `com.vison.macrochip.sj.ruko.gim`, version `1.0.5`,
+  decompiled at `decompiled-ruko-gim-1.0.5` (F11GIM3 gimbal drone).
 
 PL FPV is compatible with TurboDrone's existing `s2x` implementation. A
 Plegble PL-1515 that lists PL FPV in its guidebook was flown successfully with
@@ -506,6 +508,119 @@ this app does not even build).
 | Tilt UI | `com/vison/macrochip/activity/ControlActivity.java` L689–706 |
 | Native HY encode | `com/vison/macrochip/sdk/LGDataUtils.java` |
 
+### Ruko GIM 1.0.5 notes (F11GIM3)
+
+Ruko GIM is a **dedicated gimbal-drone OEM app** for the **F11GIM3** (also
+referenced in class/tutorial assets as F11GIM2). It uses the same **世季 SJ GPS
+Pro + HACK_FLY** stack as Ruko Drone 1.7.6, not the `w.fpv` PL FPV tree.
+
+App identity:
+
+- Package: `com.vison.macrochip.sj.ruko.gim`
+- Version: `1.0.5` / `versionCode=5`
+- Application: `com.vison.macrochip.sj.gps.pro.app.MyApplication` →
+  `SJBaseApplication`
+- Launcher: `com.vison.macrochip.sj.gps.pro.activity.WelcomeActivity`
+- Flight UI: `com.vison.macrochip.sj.gps.pro.activity.ControlHyActivity`
+  (HACK_FLY only; `WelcomeActivity` forces `ProtocolEnum.HACK_FLY`)
+- Product selector: single entry `F11GIM3` → `SJBaseApplication.DRONE_TYPE = 9`
+- Decompile: `decompiled-ruko-gim-1.0.5/`
+- Backend API host: `websiteapi.rukotoy.com` (Ruko branding in log upload:
+  `"RUKO GIM"`)
+
+#### TurboDrone mapping (existing implementation, not new)
+
+| Layer | Maps to | Notes |
+|-------|---------|-------|
+| **Video / network** | **S2x / Macrochip** | Same `BaseApplication` ports, `08` heartbeat, UDP/TCP `8888`, `vison_main` / VNDK path |
+| **RC sticks / flight** | **fld_pro Hy / HACK_FLY** | 17-byte `68 01 0D` via `SendHyControlThread` + `LGDataUtils` — **not** TurboDrone's 20-byte `66 14 ... 99` `s2x` adapter |
+| **Camera tilt** | **Ruko PTZ side channel** | `setPTZData` + ST `FF 53 54` family; see below and `s2x_ptz_helper.py` |
+
+**Conclusion:** Do **not** add a new TurboDrone backend. Treat F11GIM3 like Ruko
+Drone: Macrochip video on `DRONE_TYPE=s2x` may work, but **RC is unverified**
+until a capture confirms whether the board accepts `66 14` or requires
+`68 01 0D`. For **tilt**, use confirmed `setPTZData` / ST shapes from this
+decompile (`s2x_ptz_helper.py`), not HY bytes 8–17.
+
+`ModuleUtils.isRuko()` in the shared SJ library lists `ruko.drone`, `ruko.drone.f11`,
+and `ruko.bwine` only — **`sj.ruko.gim` is omitted**, so Ruko-specific calibration
+branches keyed on `isRuko()` may not run in this package even though the app is
+Ruko-branded.
+
+#### Differences vs Ruko Drone 1.7.6
+
+| Topic | Ruko GIM 1.0.5 | Ruko Drone 1.7.6 |
+|-------|----------------|------------------|
+| Package / UI shell | `sj.gps.pro` + `sj.ruko.gim` | `macrochip` + `ruko.drone` |
+| Default product | F11GIM3 only (`DRONE_TYPE=9`) | Multi-product selector |
+| PTZ UI | Rich: `new_ptz_layout`, `ptz_top`/`ptz_bottom`, `new_ptz_seek_bar`, `VerticalScaleMarqueeView`, legacy `ptz_up_btn`/`ptz_down_btn` | Simpler `ptz_seek_bar` + up/down buttons |
+| `SendHyControlThread.setPtzV` | **Called** from `VSollbar` progress (`setPtzV(1/2/0)`) while scrolling | Method exists; **no Java callers** in decompile |
+| `sendFlowParam` / ST3 `FF 53 54 33` | Not present in this decompile | Present in some Macrochip `w.fpv` apps |
+
+RC packet layout, `setPTZData` byte shapes, and ST command table are **the same**
+as documented under "Ruko Drone 1.7.6 notes" (`SJBaseApplication.setPTZData`,
+`getPTZAngle`, `resetPTZ`, etc.).
+
+#### Camera pitch / gimbal tilt (confirmed)
+
+This app is built around a **physical camera gimbal**. Evidence is stronger than
+generic S2x OEM apps and matches Ruko Drone's PTZ command family, with extra UI.
+
+**UI controls** (`ControlHyActivity`):
+
+- `ptz_up_btn` / `ptz_down_btn` — step `ptz_seek_bar` by ±5, call
+  `MyApplication.setPTZData(progress)`
+- `ptz_top` / `ptz_bottom` — hold-to-repeat every **50 ms**, angle
+  `90 - seekBar.getProgress()` via `SJBaseApplication.setPTZData`
+- `new_ptz_seek_bar` — on release: `setPTZData(90 - progress)` (inverted 0–90°
+  mapping)
+- `VerticalScaleMarqueeView` — drag scale; `onPtzChange` → `setPTZData(i)` when
+  `lastPtZadj == 0`
+- `VSollbar` — while adjusting, sets `SendHyControlThread.setPtzV(1|2|0)` on the
+  **recurring HY stream** (secondary path alongside discrete `setPTZData`)
+- Settings: `PTZFragment` with `pitch_btn`, `roll_btn`, `yaw_btn`, calibration,
+  reset (`SJBaseApplication.resetPTZ`, `setPTZTrim`, etc.)
+- `PTZDialog` — same `setPTZData` entry point as Ruko Drone
+
+**Telemetry / sync:**
+
+- `getPTZAngle()` polled on connect and when `lgPlaneHyBean.Brightness` changes
+- `lgPlaneHyBean.PTZadj` (decoded label: **云台上下调节** / gimbal up-down adjust)
+  drives `VerticalScaleMarqueeView` continuous scroll when non-zero
+- `AnalysisUtils` ST responses: `NOTIFY_TYPE_PTZ_ANGLE` (cmd `97`),
+  `NOTIFY_TYPE_UPDATE_PTZ_ANGLE` (cmd `21`)
+
+**Wire commands** (unchanged from Ruko Drone — see table above):
+
+| Path | Packet | When |
+|------|--------|------|
+| HACK_FLY (default) | `68 07 01 <angle> <xor>` via `writeTCPCmd` | `setPTZData` on non-Hisi boards |
+| Hisi | `FF 53 54 32 01 <angle>` | `PlayInfo.isHisi()` |
+| FEI_SHA | `5A 55 02 14 <angle> <xor>` | if protocol switches away from HACK_FLY |
+| ST side | `FF 53 54 15` trim, `18` reset, `21` get angle, etc. | UDP `8080` |
+| HY stream | `LGControlHyBean.PTZ_V` via `setPtzV` | `VSollbar` while user adjusts scale |
+
+No separate `舵机` / `servo` string was required to establish tilt — the app uses
+**PTZ** / **云台** wording and dedicated gimbal calibration UI.
+
+For TurboDrone on F11GIM3 hardware: **`s2x_ptz_helper.py`** (`st-set`, `st-get`,
+`st-reset`) is the best match to stock `setPTZData` / ST traffic while keeping a
+neutral HY or HACK_FLY stream if you later add a `68 01 0D` RC adapter.
+
+#### Key source files (Ruko GIM)
+
+| Topic | Path under `decompiled-ruko-gim-1.0.5/sources/` |
+|-------|------------------------------------------------|
+| Manifest | `resources/AndroidManifest.xml` |
+| Product / HACK_FLY default | `com/vison/macrochip/sj/gps/pro/activity/WelcomeActivity.java` |
+| Flight + PTZ UI | `com/vison/macrochip/sj/gps/pro/activity/ControlHyActivity.java` |
+| Vertical tilt control | `com/vison/macrochip/sj/gps/pro/view/VerticalScaleMarqueeView.java` |
+| HACK_FLY RC | `com/sj/baselibrary/thread/SendHyControlThread.java` |
+| PTZ commands | `com/sj/baselibrary/base/SJBaseApplication.java` |
+| PTZ parse | `com/sj/baselibrary/utils/AnalysisUtils.java` |
+| Gimbal settings UI | `com/sj/baselibrary/fragment/PTZFragment.java` |
+| Telemetry field | `com/vison/macrochip/mode/LGPlaneHyBean.java` (`PTZadj`) |
+
 Additional app-level features spotted in REDRIE FLY that do not change the
 S2x wire implementation:
 
@@ -530,11 +645,12 @@ S2x video parser.
 
 Camera tilt / PTZ note:
 
-Ruko Drone 1.7.6 (see "Ruko Drone 1.7.6 notes" above) **confirms** camera tilt
-via dedicated PTZ UI (`ptz_up_btn` / `ptz_down_btn` / `ptz_seek_bar`) and
-`setPTZData(angle)` commands on three paths: ST `FF 53 54 32`, HACK_FLY
-`68 07 01`, and FEI_SHA `5A 55 02 14`. Stock tilt does **not** ride in the
-recurring HY/FEI_SHA stick packets.
+Ruko Drone 1.7.6 and **Ruko GIM 1.0.5 / F11GIM3** (see sections above)
+**confirm** camera tilt via dedicated PTZ UI and `setPTZData(angle)` on three
+paths: ST `FF 53 54 32`, HACK_FLY `68 07 01`, and FEI_SHA `5A 55 02 14`.
+Ruko GIM additionally drives `SendHyControlThread.setPtzV` from its vertical
+scale control. Stock discrete tilt does **not** rely on the 20-byte `66 14`
+HY packet TurboDrone's `s2x` adapter sends.
 
 For PL FPV / REDRIE FLY / other Macrochip apps without visible tilt UI, the same
 ST side channel is still the best hypothesis:

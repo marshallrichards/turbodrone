@@ -134,7 +134,8 @@ python s2x_tilt_probe.py --mode st3 --auto-sweep --video-keepalive --log-file st
 
 ## PTZ helper (`s2x_ptz_helper.py`)
 
-For **confirmed Macrochip ST tilt** commands (Ruko app) while keeping the normal
+For **confirmed Macrochip ST tilt** commands (Ruko Drone / Ruko GIM F11GIM3 apps)
+while keeping the normal
 `66 14` HY stream alive — useful on PL-515 / S29 when PL FPV has no tilt UI.
 
 ```powershell
