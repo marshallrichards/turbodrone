@@ -759,17 +759,24 @@ the lower-level "I'm alive" signal.
 
 ### Implication for replacing the WiFi board (ESP32-S3)
 
-To fully impersonate the stock board on the FC side at 3.3 V / 115200 8N1, the
-replacement firmware should reproduce **both** streams on its TX → FC RX:
+To impersonate the stock board on the FC side at 3.3 V / 115200 8N1, the
+replacement firmware reproduces **both** streams on its TX → FC RX:
 
-1. Emit the `77 0E 00…00 99` heartbeat at ~22 Hz, always (independent of control).
+1. Emit the `77 0E …` frame at ~22 Hz, always (independent of control). For a
+   first version this can be the **constant all-zero** flow report
+   `77 0E 00 00 00 00 00 00 00 00 00 00 00 99` — i.e. "sensor sees no motion".
 2. Emit `66 14 RR PP TT YY F6 0A 00×10 XOR 99` control frames (built exactly like
    `s2x_rc_protocol_adapter.build_control_packet`) at the app's ~12–30 Hz cadence,
    centered when idle.
 
-A bridge that sends only control frames and omits the `77` heartbeat may not be a
-faithful stand-in; the heartbeat's role in the FC's link/failsafe logic is not
-yet characterized (see open questions).
+**v1 design decision (optical flow omitted):** the ESP32-S3 replacement will send
+the all-zero `77` report rather than reading the flow sensor. This is acceptable
+because the airframe flies normally with the flow camera covered (observed on
+hardware) — the FC simply runs without optical-flow position-hold (slightly more
+hover drift), exactly as it does when the sensor is blocked. Real flow can be
+added later by populating bytes 2–6 of the `77` frame (see decode below). The
+`77` frame must still be sent (not omitted): it doubles as the board's link
+keepalive to the FC, and dropping it entirely is uncharacterized.
 
 ### Open questions / TODO (hardware)
 
