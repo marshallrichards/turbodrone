@@ -663,6 +663,179 @@ REDRIE FLY's `66 14` HY bytes `8..17` remain zero-filled in Java; do not assume
 tilt lives there without a capture. Use `s2x_tilt_probe.py` **`st3` mode** or
 replay Ruko's `setPTZData` packet shapes when probing tilt on Macrochip hardware.
 
+## Hardware UART bridge: WiFi board → flight controller (sniffed)
+
+Everything above this point is derived from app decompilation. This section is
+the first **on-the-wire** confirmation, captured from physical hardware on a
+**LOILEY S29** (S2x family).
+
+### Setup
+
+The XR872AT WiFi/camera board exposes a 4-wire UART to the flight controller
+(silkscreen labels are from the WiFi board's perspective):
+
+- **blue** = WiFi board **TX** → flight-controller RX (the command stream)
+- **white** = WiFi board **RX** ← flight-controller TX (telemetry/back-channel)
+- **red** = VCC, **black** = GND
+
+Passive sniff rig: WiFi board TX (blue) → Arduino Mega2560 **RX1 (pin 19)**,
+GND↔GND, board powered from the Mega's 3V3. The Mega runs a UART sniffer sketch
+that groups bytes into frames on a 5 ms idle gap and dumps them over USB at
+2,000,000 baud. Decoding the board's TX as **115200 8N1** produces clean,
+structured, checksum-valid frames, so the board↔FC link is **115200 8N1**.
+
+PC joined the drone's WiFi (drone `172.16.10.1`, PC `172.16.10.2`) and replayed
+S2x control packets to UDP `8080` while sniffing the FC-bound UART, then
+correlated the two. The autonomous correlation harness used for this
+(`s2x_bridge_probe.py`: baseline → distinctive-signature → per-axis sweeps →
+flag tests, logging every timestamped UART frame) lives in a standalone `recon/`
+workspace folder, not committed to this repo.
+
+### Key finding: the WiFi board is a transparent UDP → UART bridge
+
+Control packets the app/TurboDrone send to UDP `172.16.10.1:8080` are re-emitted
+**byte-for-byte** on the board's TX line to the flight controller, including the
+XOR checksum. The board does not re-pack, re-checksum, or rate-shape the control
+payload.
+
+Distinctive-signature proof (sent a unique R/P/T/Y so it can't be confused with
+an idle/app frame):
+
+```text
+UDP out : 66 14 11 22 33 44 00 0A 00 00 00 00 00 00 00 00 00 00 4E 99
+UART in : 66 14 11 22 33 44 00 0A 00 00 00 00 00 00 00 00 00 00 4E 99   (~17 ms later)
+```
+
+Per-axis sweeps (`0x00→0xFF`) confirmed the on-wire byte positions match the
+documented HY layout exactly, with the other three axes pinned at `0x80`:
+
+| Axis | UART byte | Sweep result |
+|------|-----------|--------------|
+| Roll | `[2]` | exact passthrough |
+| Pitch | `[3]` | exact passthrough |
+| Throttle | `[4]` | exact passthrough |
+| Yaw | `[5]` | exact passthrough |
+
+Byte `6` command flags also pass through unchanged: takeoff/land `0x01`,
+e-stop `0x02`, calibrate `0x04` were each observed verbatim on the FC line. This
+hardware-validates the byte-2..5 ordering and the byte-6 flag map that were
+previously only inferred from decompiled Java, and confirms TurboDrone's
+`s2x_rc_protocol_adapter` builds the exact bytes the FC actually receives
+(`speed=0x14`, `byte7=0x0a`).
+
+The passthrough covers the **entire 20-byte frame**, not just the sticks: byte-1
+(speed) and byte-7 were also forwarded verbatim across arbitrary values
+(`speed` swept incl. `0x00`/`0x28`/`0xFF`; `byte7` incl. `0x0b`/`0x0e`/`0x55`).
+The board performs no interpretation of the control payload at all.
+
+### Baseline / idle behavior (what the FC sees before any stick input)
+
+There are **two independent streams** on the board's TX line:
+
+1. **`77 0E` optical-flow report** (also serves as a keepalive) — 14 bytes:
+   `0x77` start, `0x0E`=length 14, 10 payload bytes, XOR checksum, `0x99` end. The
+   board emits this **continuously at ~22 Hz (median gap ~45 ms)** regardless of
+   whether any app is connected. The payload is **all-zero only while the drone is
+   stationary**; when the optical-flow sensor sees motion it carries flow vectors
+   (decoded under "Optical-flow" below). With the phone off and the drone sitting
+   still, this all-zero frame is the only thing on the wire — which is why it first
+   looked like a plain heartbeat.
+2. **`66 14` control** — only present when something is actively sending UDP to
+   `8080`. The board forwards each control packet as it arrives.
+
+So the answer to "does the board send a baseline thing before throttle input?":
+- The board itself contributes only the `77` heartbeat. It does **not** generate
+  a control packet on its own and does **not** appear to emit a special
+  "app connected" announcement to the FC — when UDP control starts, the board
+  simply begins forwarding (first forwarded frame seen ~17 ms after send start).
+- The continuous **centered** control packet (`66 14 80 80 80 80 00 0A … 99`) that
+  the FC sees while an app is connected but idle originates from the *controller*
+  (the stock app streams centered sticks at ~12–20 Hz even with no input), not
+  from the board. The board just relays it.
+
+Implication: a centered idle `66 14 80 80 80 80 …` stream is effectively the
+"armed-link / sticks-neutral" baseline the FC expects, and the `77` heartbeat is
+the lower-level "I'm alive" signal.
+
+### Implication for replacing the WiFi board (ESP32-S3)
+
+To fully impersonate the stock board on the FC side at 3.3 V / 115200 8N1, the
+replacement firmware should reproduce **both** streams on its TX → FC RX:
+
+1. Emit the `77 0E 00…00 99` heartbeat at ~22 Hz, always (independent of control).
+2. Emit `66 14 RR PP TT YY F6 0A 00×10 XOR 99` control frames (built exactly like
+   `s2x_rc_protocol_adapter.build_control_packet`) at the app's ~12–30 Hz cadence,
+   centered when idle.
+
+A bridge that sends only control frames and omits the `77` heartbeat may not be a
+faithful stand-in; the heartbeat's role in the FC's link/failsafe logic is not
+yet characterized (see open questions).
+
+### Open questions / TODO (hardware)
+
+- **Reverse channel:** sniff the FC → board direction (white wire → Arduino
+  **RX2 / pin 17**) to recover telemetry (battery, status, stick echo). Only the
+  board→FC direction has been captured so far.
+- **`77` flow axis/scale:** the message is decoded (see "Optical-flow" below), but
+  the X/Y axis-to-direction mapping, polarity, units/scale, and the exact meaning
+  of byte 6 (quality vs height) still need a guided motion capture.
+
+Resolved by follow-up hardware tests (no rewiring needed):
+
+- **Failsafe — RESOLVED:** when the UDP control stream stops, the board emits
+  **zero** control frames; it does **not** latch or repeat the last command. Only
+  the `77` heartbeat continues (~22 Hz). Link-loss failsafe therefore lives on
+  the **flight controller**, not the WiFi board — the board simply stops relaying.
+- **Byte 7 / speed — RESOLVED:** both are forwarded **verbatim** (see "full
+  20-byte passthrough" above); the board does not act on them. Any FC behavior
+  change from byte-7 bits or the speed byte is a property of the FC firmware.
+
+### Optical-flow sensor: the `77` message is the flow channel (RESOLVED)
+
+On this airframe the optical-flow sensor plugs into the **WiFi/camera board**,
+not directly into the FC. The question was whether the XR872 (a) relays flow data
+to the FC, or (b) runs the position-hold loop itself and injects roll/pitch
+corrections into the `66 14` control stream.
+
+**Answer: (a).** The `77` message *is* the optical-flow report from the board to
+the FC. Capturing the board→FC TX while moving the drone over a textured floor
+(then setting it back on a table) showed the `77` payload fill with structured
+flow data during motion and return to all-zero when stationary. The board never
+modified the `66` control stream (bytes 2–5 stayed exactly as sent), so the FC —
+not the WiFi board — closes the position-hold loop. The board's role is: relay
+control UDP→UART verbatim, and report flow sensor data upstream to the FC.
+
+Decoded `77` frame (14 bytes):
+
+```text
+77 0E  FXlo FXhi  FYlo FYhi  QQ  00 00 00 00 00  CK  99
+```
+
+| Byte | Field | Notes |
+|------|-------|-------|
+| `0` | `0x77` | start marker |
+| `1` | `0x0E` | length = 14 |
+| `2..3` | flow X | signed 16-bit little-endian; 0 when stationary |
+| `4..5` | flow Y | signed 16-bit little-endian; 0 when stationary |
+| `6` | quality/height | non-zero only when flow active (e.g. `0xFF` then `0x6F..0xCF`); exact meaning — surface quality vs height — not yet pinned down |
+| `7..11` | reserved | always `0x00` observed so far |
+| `12` | checksum | XOR of bytes `2..11` (same scheme as the `66` packet) |
+| `13` | `0x99` | end marker |
+
+Sample (moving over floor): `77 0E 56 FE B0 FF FF 00 00 00 00 00 18 99`
+→ flowX = `0xFE56` = -426, flowY = `0xFFB0` = -80, quality = `0xFF`,
+checksum `56^FE^B0^FF^FF = 0x18`. Stationary: `77 0E 00 00 00 00 00 00 00 00 00 00 00 99`.
+
+**Implication for an ESP32-S3 replacement:** to be a faithful stand-in the
+replacement must *also* read the same flow sensor and emit the `77` flow report
+at ~22 Hz, or the FC loses optical-flow position-hold. A control-only bridge will
+fly but without flow stabilization.
+
+**Still to characterize:** sign/axis convention (which int16 is forward/right and
+its polarity), units/scale, and the exact meaning of byte 6 (quality vs height).
+A guided capture — log the decoded `77` stream while sliding the drone a known
+direction/distance and raising/lowering it — would settle these.
+
 ## RC timing and feel
 
 The inspected stock app paths send RC packets every 50 ms:
