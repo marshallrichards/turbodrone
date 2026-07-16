@@ -128,6 +128,24 @@ Web Client: support for various inputs like keyboard, gamepad controllers, and T
 Working on adding support for more drones from [Amazon's best-selling drone list](https://www.amazon.com/best-selling-drones/s?k=best+selling+drones).
 
 
+## Troubleshooting
+
+<details>
+<summary>No video feed</summary>
+
+If controls work in the turbodrone interface, but there's no video feed, the issue is likely that your firewall blocks incoming UDP packets.
+
+Linux fix (does not persist after current session):
+```sh
+DRONE_IP=$(ip -4 route show default | awk '{print $3; exit}') # Drone gateway, e.g. 172.16.10.1
+WIFI_IFACE=$(ip -4 route get "$DRONE_IP" | sed -n 's/.*dev \([^ ]*\).*/\1/p')
+# --dport per drone type: s2x=8888, wifi_uav=8800, wifi_cam=8080, x69_lg(h265)=1234, x69_lg(jpeg)=7070, cooingdv_jieli=6666
+sudo iptables -I INPUT 1 -i "$WIFI_IFACE" -p udp -s "$DRONE_IP" --dport "8888" -j ACCEPT
+sysctl -w "net.ipv4.conf.$WIFI_IFACE.rp_filter=0" # Optional, if still no video after above command.
+```
+</details>
+
+
 ## Contribute
 To contribute support for a new "toy" drone, download the APK the drone uses on a mirror site and start reverse engineering it by decompiling to Java files with [jadx](https://github.com/skylot/jadx).
 From there, look at the `AndroidManifest.xml` and see if you can find the classes that are entry points for the app. Look for port usage or protocol usage explicitly mentioned like TCP or UDP. Most of these apps will do the actual communication and video feed processing in native C++ libraries that will be embedded inside the APK. You can use a tool like Ghidra to decompile the native libraries and see if you can discover anything useful. For video feed processing you want to figure out what format it uses e.g. JPEG, YUV, etc. and also if it uses compression and what the byte structure looks like when its reforming an image frame from packets.
